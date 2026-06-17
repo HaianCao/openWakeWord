@@ -19,14 +19,11 @@ def generate_multi_model_samples(
     """
     Generate synthetic TTS samples using multiple Piper ONNX models.
     """
-    # Import Piper dynamically
-    if piper_src_path not in sys.path:
-        sys.path.insert(0, os.path.abspath(piper_src_path))
-    
+    # Import Piper (installed via pip)
     try:
         from piper import PiperVoice, SynthesisConfig
     except ImportError as e:
-        raise ImportError(f"Failed to import Piper from {piper_src_path}. Please check the path.") from e
+        raise ImportError(f"Failed to import Piper. Please ensure it is installed.") from e
 
     if isinstance(text, str):
         texts = [text]
@@ -78,25 +75,30 @@ def generate_multi_model_samples(
             
             # Synthesize and write wav
             try:
+                # Resolve synthesis into a list first to catch any errors BEFORE opening the file
+                audio_chunks = list(voice.synthesize(t, syn_config))
+                if not audio_chunks:
+                    print(f"Warning: No audio chunks generated for text '{t}'")
+                    continue
+
                 wav_file = wave.open(wav_path, "wb")
                 with wav_file:
-                    wav_params_set = False
-                    for i_chunk, audio_chunk in enumerate(voice.synthesize(t, syn_config)):
-                        if not wav_params_set:
-                            wav_file.setframerate(audio_chunk.sample_rate)
-                            wav_file.setsampwidth(audio_chunk.sample_width)
-                            wav_file.setnchannels(audio_chunk.sample_channels)
-                            wav_params_set = True
-                        
-                        # Add silence between sentences if any (not usually needed for single words)
-                        # but keeping it safe
+                    wav_file.setframerate(audio_chunks[0].sample_rate)
+                    wav_file.setsampwidth(audio_chunks[0].sample_width)
+                    wav_file.setnchannels(audio_chunks[0].sample_channels)
+                    
+                    for i_chunk, audio_chunk in enumerate(audio_chunks):
                         if i_chunk > 0:
                             silence_int16_bytes = bytes(int(voice.config.sample_rate * 0.0 * 2))
                             wav_file.writeframes(silence_int16_bytes)
-                            
                         wav_file.writeframes(audio_chunk.audio_int16_bytes)
                 total_generated += 1
             except Exception as e:
+                import traceback
                 print(f"Error synthesizing text '{t}' with model {model_path_str}: {e}")
+                traceback.print_exc()
+                # Clean up empty/corrupted file if it was created
+                if os.path.exists(wav_path):
+                    os.remove(wav_path)
                 
     print(f"Successfully generated {total_generated} samples in {output_dir}")
