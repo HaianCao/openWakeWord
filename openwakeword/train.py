@@ -574,9 +574,13 @@ class Model(nn.Module):
 def convert_onnx_to_tflite(onnx_model_path, output_path):
     """Converts an ONNX version of an openwakeword model to the Tensorflow tflite format."""
     # imports
-    import onnx
-    from onnx_tf.backend import prepare
-    import tensorflow as tf
+    try:
+        import onnx
+        from onnx_tf.backend import prepare
+        import tensorflow as tf
+    except ImportError as e:
+        print(f"Skipping tflite conversion: {e}")
+        return None
 
     # Convert to tflite from onnx model
     onnx_model = onnx.load(onnx_model_path)
