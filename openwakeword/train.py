@@ -641,9 +641,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     config = yaml.load(open(args.training_config, 'r').read(), yaml.Loader)
 
-    # imports Piper for synthetic sample generation
-    sys.path.insert(0, os.path.abspath(config["piper_sample_generator_path"]))
-    from generate_samples import generate_samples
+    # imports custom Vietnamese Piper sample generation
+    from openwakeword.generate_custom_samples import generate_multi_model_samples
 
     # Define output locations
     config["output_dir"] = os.path.abspath(config["output_dir"])
@@ -673,12 +672,12 @@ if __name__ == '__main__':
             os.mkdir(positive_train_output_dir)
         n_current_samples = len(os.listdir(positive_train_output_dir))
         if n_current_samples <= 0.95*config["n_samples"]:
-            generate_samples(
+            generate_multi_model_samples(
                 text=config["target_phrase"], max_samples=config["n_samples"]-n_current_samples,
-                batch_size=config["tts_batch_size"],
+                piper_models=config["piper_models"],
+                piper_src_path=config["piper_src_path"],
                 noise_scales=[0.98], noise_scale_ws=[0.98], length_scales=[0.75, 1.0, 1.25],
-                output_dir=positive_train_output_dir, auto_reduce_batch_size=True,
-                file_names=[uuid.uuid4().hex + ".wav" for i in range(config["n_samples"])]
+                output_dir=positive_train_output_dir,
             )
             torch.cuda.empty_cache()
         else:
@@ -690,10 +689,13 @@ if __name__ == '__main__':
             os.mkdir(positive_test_output_dir)
         n_current_samples = len(os.listdir(positive_test_output_dir))
         if n_current_samples <= 0.95*config["n_samples_val"]:
-            generate_samples(text=config["target_phrase"], max_samples=config["n_samples_val"]-n_current_samples,
-                             batch_size=config["tts_batch_size"],
-                             noise_scales=[1.0], noise_scale_ws=[1.0], length_scales=[0.75, 1.0, 1.25],
-                             output_dir=positive_test_output_dir, auto_reduce_batch_size=True)
+            generate_multi_model_samples(
+                text=config["target_phrase"], max_samples=config["n_samples_val"]-n_current_samples,
+                piper_models=config["piper_models"],
+                piper_src_path=config["piper_src_path"],
+                noise_scales=[1.0], noise_scale_ws=[1.0], length_scales=[0.75, 1.0, 1.25],
+                output_dir=positive_test_output_dir,
+            )
             torch.cuda.empty_cache()
         else:
             logging.warning(f"Skipping generation of positive clips testing, as ~{config['n_samples_val']} already exist")
@@ -705,18 +707,14 @@ if __name__ == '__main__':
         n_current_samples = len(os.listdir(negative_train_output_dir))
         if n_current_samples <= 0.95*config["n_samples"]:
             adversarial_texts = config["custom_negative_phrases"]
-            for target_phrase in config["target_phrase"]:
-                adversarial_texts.extend(generate_adversarial_texts(
-                    input_text=target_phrase,
-                    N=config["n_samples"]//len(config["target_phrase"]),
-                    include_partial_phrase=1.0,
-                    include_input_words=0.2))
-            generate_samples(text=adversarial_texts, max_samples=config["n_samples"]-n_current_samples,
-                             batch_size=config["tts_batch_size"]//7,
-                             noise_scales=[0.98], noise_scale_ws=[0.98], length_scales=[0.75, 1.0, 1.25],
-                             output_dir=negative_train_output_dir, auto_reduce_batch_size=True,
-                             file_names=[uuid.uuid4().hex + ".wav" for i in range(config["n_samples"])]
-                             )
+            # Skip English adversarial generation for Vietnamese models
+            generate_multi_model_samples(
+                text=adversarial_texts, max_samples=config["n_samples"]-n_current_samples,
+                piper_models=config["piper_models"],
+                piper_src_path=config["piper_src_path"],
+                noise_scales=[0.98], noise_scale_ws=[0.98], length_scales=[0.75, 1.0, 1.25],
+                output_dir=negative_train_output_dir,
+            )
             torch.cuda.empty_cache()
         else:
             logging.warning(f"Skipping generation of negative clips for training, as ~{config['n_samples']} already exist")
@@ -728,16 +726,14 @@ if __name__ == '__main__':
         n_current_samples = len(os.listdir(negative_test_output_dir))
         if n_current_samples <= 0.95*config["n_samples_val"]:
             adversarial_texts = config["custom_negative_phrases"]
-            for target_phrase in config["target_phrase"]:
-                adversarial_texts.extend(generate_adversarial_texts(
-                    input_text=target_phrase,
-                    N=config["n_samples_val"]//len(config["target_phrase"]),
-                    include_partial_phrase=1.0,
-                    include_input_words=0.2))
-            generate_samples(text=adversarial_texts, max_samples=config["n_samples_val"]-n_current_samples,
-                             batch_size=config["tts_batch_size"]//7,
-                             noise_scales=[1.0], noise_scale_ws=[1.0], length_scales=[0.75, 1.0, 1.25],
-                             output_dir=negative_test_output_dir, auto_reduce_batch_size=True)
+            # Skip English adversarial generation for Vietnamese models
+            generate_multi_model_samples(
+                text=adversarial_texts, max_samples=config["n_samples_val"]-n_current_samples,
+                piper_models=config["piper_models"],
+                piper_src_path=config["piper_src_path"],
+                noise_scales=[1.0], noise_scale_ws=[1.0], length_scales=[0.75, 1.0, 1.25],
+                output_dir=negative_test_output_dir,
+            )
             torch.cuda.empty_cache()
         else:
             logging.warning(f"Skipping generation of negative clips for testing, as ~{config['n_samples_val']} already exist")

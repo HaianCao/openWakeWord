@@ -142,3 +142,7 @@ examples/
 
 # archive files
 archive/
+
+*.onnx
+*.tflite
+*.wav

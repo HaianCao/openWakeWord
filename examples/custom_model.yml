@@ -10,7 +10,13 @@ target_phrase:
 
 # Specific phrases that you do *not* want the model to activate on, outside of those generated automatically via phoneme overlap
 # This can be a good way to reduce false positives if you notice that, in practice, certain words or phrases are problematic
-custom_negative_phrases: []
+custom_negative_phrases:
+  - "tám mì gói"
+  - "tắm đi ói"
+  - "tham thì đói"
+  - "chạm đi ôi"
+  - "tạo mới thôi"
+  - "tám mươi hai"
 
 # The total number of positive samples to generate for training (minimum of 20,000 recommended, often 100,000+ is best)
 n_samples: 10000
@@ -25,8 +31,14 @@ tts_batch_size: 50
 # It's recommended that this not be too large to ensure that there is enough variety in the augmentation
 augmentation_batch_size: 16
 
-# The path to a fork of the piper-sample-generator repository for TTS (https://github.com/dscripka/piper-sample-generator)
-piper_sample_generator_path: "./piper-sample-generator"
+# The path to the piper1-gpl src directory for TTS
+piper_src_path: "../piper1-gpl/src"
+
+# The list of Vietnamese ONNX models to use for generating TTS samples
+piper_models:
+  - "vi_VN-vivos-x_low.onnx"
+  - "vi_VN-vais1000-medium.onnx"
+  - "vi_VN-25hours_single-low.onnx"
 
 # The output directory for the generated synthetic clips, openwakeword features, and trained models
 # Sub-directories will be automatically created for train and test clips for both positive and negative examples
