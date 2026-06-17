@@ -3,6 +3,8 @@ import sys
 import uuid
 import random
 import wave
+import numpy as np
+from scipy import signal
 from pathlib import Path
 from typing import List, Union
 
@@ -82,16 +84,29 @@ def generate_multi_model_samples(
                     continue
 
                 wav_file = wave.open(wav_path, "wb")
+                TARGET_SAMPLE_RATE = 16000
                 with wav_file:
-                    wav_file.setframerate(audio_chunks[0].sample_rate)
+                    wav_file.setframerate(TARGET_SAMPLE_RATE)
                     wav_file.setsampwidth(audio_chunks[0].sample_width)
                     wav_file.setnchannels(audio_chunks[0].sample_channels)
                     
                     for i_chunk, audio_chunk in enumerate(audio_chunks):
+                        audio = audio_chunk.audio_float_array
+                        orig_sr = audio_chunk.sample_rate
+                        
+                        # Resample to 16000 Hz if necessary
+                        if orig_sr != TARGET_SAMPLE_RATE:
+                            num_samples = int(round(len(audio) * float(TARGET_SAMPLE_RATE) / orig_sr))
+                            audio = signal.resample(audio, num_samples)
+                            
                         if i_chunk > 0:
-                            silence_int16_bytes = bytes(int(voice.config.sample_rate * 0.0 * 2))
+                            silence_int16_bytes = bytes(int(TARGET_SAMPLE_RATE * 0.0 * 2))
                             wav_file.writeframes(silence_int16_bytes)
-                        wav_file.writeframes(audio_chunk.audio_int16_bytes)
+                            
+                        # Convert to int16 bytes
+                        _MAX_WAV_VALUE = 32767.0
+                        audio_int16 = np.clip(audio * _MAX_WAV_VALUE, -_MAX_WAV_VALUE, _MAX_WAV_VALUE).astype(np.int16)
+                        wav_file.writeframes(audio_int16.tobytes())
                 total_generated += 1
             except Exception as e:
                 import traceback
