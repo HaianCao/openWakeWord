@@ -18,7 +18,8 @@ def generate_multi_model_samples(
     length_scales: List[float] = [0.75, 1.0, 1.25],
     noise_scales: List[float] = [0.98],
     noise_scale_ws: List[float] = [0.98],
-    tts_engine: str = "piper"
+    tts_engine: str = "piper",
+    batch_size: int = 32
 ):
     """
     Generate synthetic TTS samples using multiple Piper ONNX models or VieNeu-TTS.
@@ -49,7 +50,7 @@ def generate_multi_model_samples(
             print(f"Failed to load VieNeu-TTS: {e}")
             return
             
-        BATCH_SIZE = 32
+        BATCH_SIZE = batch_size
         import scipy.io.wavfile
         from tqdm import tqdm
         
