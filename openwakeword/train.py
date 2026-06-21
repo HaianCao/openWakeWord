@@ -679,8 +679,8 @@ if __name__ == '__main__':
         if n_current_samples <= 0.95*config["n_samples"]:
             generate_multi_model_samples(
                 text=config["target_phrase"], max_samples=config["n_samples"]-n_current_samples,
-                piper_models=config["piper_models"],
-                piper_src_path=config["piper_src_path"],
+                piper_models=config.get("piper_models", []),
+                piper_src_path=config.get("piper_src_path", ""),
                 noise_scales=[0.98], noise_scale_ws=[0.98], length_scales=[0.75, 1.0, 1.25],
                 output_dir=positive_train_output_dir,
                 tts_engine=config.get("tts_engine", "piper")
@@ -697,8 +697,8 @@ if __name__ == '__main__':
         if n_current_samples <= 0.95*config["n_samples_val"]:
             generate_multi_model_samples(
                 text=config["target_phrase"], max_samples=config["n_samples_val"]-n_current_samples,
-                piper_models=config["piper_models"],
-                piper_src_path=config["piper_src_path"],
+                piper_models=config.get("piper_models", []),
+                piper_src_path=config.get("piper_src_path", ""),
                 noise_scales=[1.0], noise_scale_ws=[1.0], length_scales=[0.75, 1.0, 1.25],
                 output_dir=positive_test_output_dir,
                 tts_engine=config.get("tts_engine", "piper")
@@ -717,8 +717,8 @@ if __name__ == '__main__':
             # Skip English adversarial generation for Vietnamese models
             generate_multi_model_samples(
                 text=adversarial_texts, max_samples=config["n_samples"]-n_current_samples,
-                piper_models=config["piper_models"],
-                piper_src_path=config["piper_src_path"],
+                piper_models=config.get("piper_models", []),
+                piper_src_path=config.get("piper_src_path", ""),
                 noise_scales=[0.98], noise_scale_ws=[0.98], length_scales=[0.75, 1.0, 1.25],
                 output_dir=negative_train_output_dir,
                 tts_engine=config.get("tts_engine", "piper")
@@ -737,8 +737,8 @@ if __name__ == '__main__':
             # Skip English adversarial generation for Vietnamese models
             generate_multi_model_samples(
                 text=adversarial_texts, max_samples=config["n_samples_val"]-n_current_samples,
-                piper_models=config["piper_models"],
-                piper_src_path=config["piper_src_path"],
+                piper_models=config.get("piper_models", []),
+                piper_src_path=config.get("piper_src_path", ""),
                 noise_scales=[1.0], noise_scale_ws=[1.0], length_scales=[0.75, 1.0, 1.25],
                 output_dir=negative_test_output_dir,
                 tts_engine=config.get("tts_engine", "piper")
