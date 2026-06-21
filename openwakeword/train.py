@@ -645,6 +645,18 @@ if __name__ == '__main__':
     args = parser.parse_args()
     config = yaml.load(open(args.training_config, 'r').read(), yaml.Loader)
 
+    # Đảm bảo các tham số huấn luyện luôn có giá trị mặc định nếu người dùng quên cấu hình
+    config["augmentation_rounds"] = config.get("augmentation_rounds", 1)
+    config["augmentation_batch_size"] = config.get("augmentation_batch_size", 128)
+    config["model_type"] = config.get("model_type", "nn")
+    config["layer_size"] = config.get("layer_size", 16)
+    config["feature_data_files"] = config.get("feature_data_files", {})
+    config["batch_n_per_class"] = config.get("batch_n_per_class", {"positive": 10, "adversarial_negative": 10, "background": 10})
+    config["steps"] = config.get("steps", 100000)
+    config["learning_rate"] = config.get("learning_rate", 0.001)
+    config["val_steps"] = config.get("val_steps", 1000)
+    config["val_freq"] = config.get("val_freq", 1000)
+    config["warmup_steps"] = config.get("warmup_steps", 1000)
     # imports custom Vietnamese Piper sample generation
     from openwakeword.generate_custom_samples import generate_multi_model_samples
 
