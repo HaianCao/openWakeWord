@@ -49,49 +49,50 @@ def generate_multi_model_samples(
             print(f"Failed to load VieNeu-TTS: {e}")
             return
             
-        for _ in range(max_samples):
-            t = random.choice(texts)
-            # Chọn ngẫu nhiên 1 giọng từ danh sách các preset có sẵn
-            label, voice_id = random.choice(preset_voices)
-            
-            unique_id = str(uuid.uuid4())
-            wav_path = os.path.join(output_dir, f"{unique_id}.wav")
-            
-            try:
-                # Sinh âm thanh
-                audio = tts.infer(t, voice=voice_id)
-                # Lưu vào file tạm để đọc lại dữ liệu dạng chuỗi byte một cách an toàn
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
-                    tmp_path = tmp_file.name
+        BATCH_SIZE = 32
+        import scipy.io.wavfile
+        from tqdm import tqdm
+        
+        with tqdm(total=max_samples, desc=f"Batched Generation (BS={BATCH_SIZE})") as pbar:
+            while total_generated < max_samples:
+                current_batch_size = min(BATCH_SIZE, max_samples - total_generated)
+                batch_texts = [random.choice(texts) for _ in range(current_batch_size)]
+                label, voice_id = random.choice(preset_voices)
                 
-                tts.save(audio, tmp_path)
-                
-                # Đọc lại bằng scipy
-                import scipy.io.wavfile
-                orig_sr, dat = scipy.io.wavfile.read(tmp_path)
-                
-                # Resample về chuẩn 16kHz của openWakeWord
-                if orig_sr != TARGET_SAMPLE_RATE:
-                    num_samples = int(round(len(dat) * float(TARGET_SAMPLE_RATE) / orig_sr))
-                    dat = signal.resample(dat, num_samples)
-                
-                # Chuẩn hoá về định dạng int16
-                if dat.dtype != np.int16:
-                    _MAX_WAV_VALUE = 32767.0
-                    if dat.dtype in [np.float32, np.float64]:
-                        dat = np.clip(dat * _MAX_WAV_VALUE, -_MAX_WAV_VALUE, _MAX_WAV_VALUE).astype(np.int16)
-                    else:
-                        dat = dat.astype(np.int16)
-                
-                scipy.io.wavfile.write(wav_path, TARGET_SAMPLE_RATE, dat)
-                os.remove(tmp_path)
-                total_generated += 1
-            except Exception as e:
-                print(f"Error synthesizing text '{t}' with VieNeu-TTS (voice={voice_id}): {e}")
-                if 'tmp_path' in locals() and os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-                if os.path.exists(wav_path):
-                    os.remove(wav_path)
+                try:
+                    # Infer the entire batch
+                    audio_arrays = tts.infer_batch(batch_texts, voice=voice_id)
+                    
+                    for audio in audio_arrays:
+                        unique_id = str(uuid.uuid4())
+                        wav_path = os.path.join(output_dir, f"{unique_id}.wav")
+                        
+                        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+                            tmp_path = tmp_file.name
+                        
+                        tts.save(audio, tmp_path)
+                        orig_sr, dat = scipy.io.wavfile.read(tmp_path)
+                        
+                        if orig_sr != TARGET_SAMPLE_RATE:
+                            num_samples = int(round(len(dat) * float(TARGET_SAMPLE_RATE) / orig_sr))
+                            dat = signal.resample(dat, num_samples)
+                        
+                        if dat.dtype != np.int16:
+                            _MAX_WAV_VALUE = 32767.0
+                            if dat.dtype in [np.float32, np.float64]:
+                                dat = np.clip(dat * _MAX_WAV_VALUE, -_MAX_WAV_VALUE, _MAX_WAV_VALUE).astype(np.int16)
+                            else:
+                                dat = dat.astype(np.int16)
+                        
+                        scipy.io.wavfile.write(wav_path, TARGET_SAMPLE_RATE, dat)
+                        os.remove(tmp_path)
+                        total_generated += 1
+                        pbar.update(1)
+                        
+                except Exception as e:
+                    print(f"\nError synthesizing batch with VieNeu-TTS (voice={voice_id}): {e}")
+                    if 'tmp_path' in locals() and os.path.exists(tmp_path):
+                        os.remove(tmp_path)
                     
         print(f"Successfully generated {total_generated} samples using VieNeu-TTS in {output_dir}")
         return
