@@ -664,8 +664,9 @@ if __name__ == '__main__':
     # Get paths for impulse response and background audio files
     rir_paths = [i.path for j in config["rir_paths"] for i in os.scandir(j)]
     background_paths = []
-    if len(config["background_paths_duplication_rate"]) != len(config["background_paths"]):
-        config["background_paths_duplication_rate"] = [1]*len(config["background_paths"])
+    bg_dup_rate = config.get("background_paths_duplication_rate", [])
+    if len(bg_dup_rate) != len(config.get("background_paths", [])):
+        config["background_paths_duplication_rate"] = [1]*len(config.get("background_paths", []))
     for background_path, duplication_rate in zip(config["background_paths"], config["background_paths_duplication_rate"]):
         background_paths.extend([i.path for i in os.scandir(background_path)]*duplication_rate)
 
