@@ -598,8 +598,10 @@ def compute_features_from_generator(generator, n_total, clip_duration, output_fi
         fp.flush()
 
     # Trip empty rows from the mmapped array
+    del fp
+    import gc
+    gc.collect()
     trim_mmap(output_file)
-
 
 # Function to download files from a URL with a progress bar
 def download_file(url, target_directory, file_size=None):

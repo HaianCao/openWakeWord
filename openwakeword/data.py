@@ -885,6 +885,12 @@ def trim_mmap(mmap_path):
             mmap_file2[i:i+1024] = mmap_file1[i:i+1024].copy()
             mmap_file2.flush()
 
+    # Delete references to allow Windows to release the file handle
+    del mmap_file1
+    del mmap_file2
+    import gc
+    gc.collect()
+
     # Remove old mmaped file
     os.remove(mmap_path)
 

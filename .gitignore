@@ -146,3 +146,11 @@ archive/
 *.onnx
 *.tflite
 *.wav
+my_custom_model/
+my_model_vieneu.yaml
+*.npy
+test_vieneu.wav
+test_vieneu.py
+test_model_mic.py
+evaluate_model.py
+add_cell.py

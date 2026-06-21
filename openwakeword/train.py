@@ -682,6 +682,7 @@ if __name__ == '__main__':
                 piper_src_path=config["piper_src_path"],
                 noise_scales=[0.98], noise_scale_ws=[0.98], length_scales=[0.75, 1.0, 1.25],
                 output_dir=positive_train_output_dir,
+                tts_engine=config.get("tts_engine", "piper")
             )
             torch.cuda.empty_cache()
         else:
@@ -699,6 +700,7 @@ if __name__ == '__main__':
                 piper_src_path=config["piper_src_path"],
                 noise_scales=[1.0], noise_scale_ws=[1.0], length_scales=[0.75, 1.0, 1.25],
                 output_dir=positive_test_output_dir,
+                tts_engine=config.get("tts_engine", "piper")
             )
             torch.cuda.empty_cache()
         else:
@@ -718,6 +720,7 @@ if __name__ == '__main__':
                 piper_src_path=config["piper_src_path"],
                 noise_scales=[0.98], noise_scale_ws=[0.98], length_scales=[0.75, 1.0, 1.25],
                 output_dir=negative_train_output_dir,
+                tts_engine=config.get("tts_engine", "piper")
             )
             torch.cuda.empty_cache()
         else:
@@ -737,6 +740,7 @@ if __name__ == '__main__':
                 piper_src_path=config["piper_src_path"],
                 noise_scales=[1.0], noise_scale_ws=[1.0], length_scales=[0.75, 1.0, 1.25],
                 output_dir=negative_test_output_dir,
+                tts_engine=config.get("tts_engine", "piper")
             )
             torch.cuda.empty_cache()
         else:
@@ -868,8 +872,16 @@ if __name__ == '__main__':
             n_cpus = 1
         else:
             n_cpus = n_cpus//2
-        X_train = torch.utils.data.DataLoader(IterDataset(batch_generator),
-                                              batch_size=None, num_workers=n_cpus, prefetch_factor=16)
+            
+        if os.name == "nt":
+            n_cpus = 0
+
+        if n_cpus > 0:
+            X_train = torch.utils.data.DataLoader(IterDataset(batch_generator),
+                                                  batch_size=None, num_workers=n_cpus, prefetch_factor=16)
+        else:
+            X_train = torch.utils.data.DataLoader(IterDataset(batch_generator),
+                                                  batch_size=None, num_workers=n_cpus)
 
         X_val_fp = np.load(config["false_positive_validation_data_path"])
         X_val_fp = np.array([X_val_fp[i:i+input_shape[0]] for i in range(0, X_val_fp.shape[0]-input_shape[0], 1)])  # reshape to match model
@@ -898,7 +910,7 @@ if __name__ == '__main__':
             false_positive_val_data=X_val_fp,
             steps=config["steps"],
             max_negative_weight=config["max_negative_weight"],
-            target_fp_per_hour=config["target_false_positives_per_hour"],
+            target_fp_per_hour=config.get("target_false_positives_per_hour", 0.2),
         )
 
         # Export the trained model to onnx

@@ -3,6 +3,7 @@ import sys
 import uuid
 import random
 import wave
+import tempfile
 import numpy as np
 from scipy import signal
 from pathlib import Path
@@ -16,30 +17,95 @@ def generate_multi_model_samples(
     output_dir: str,
     length_scales: List[float] = [0.75, 1.0, 1.25],
     noise_scales: List[float] = [0.98],
-    noise_scale_ws: List[float] = [0.98]
+    noise_scale_ws: List[float] = [0.98],
+    tts_engine: str = "piper"
 ):
     """
-    Generate synthetic TTS samples using multiple Piper ONNX models.
+    Generate synthetic TTS samples using multiple Piper ONNX models or VieNeu-TTS.
     """
-    # Import Piper (installed via pip)
-    try:
-        from piper import PiperVoice, SynthesisConfig
-    except ImportError as e:
-        raise ImportError(f"Failed to import Piper. Please ensure it is installed.") from e
-
     if isinstance(text, str):
         texts = [text]
     else:
         texts = text
 
     os.makedirs(output_dir, exist_ok=True)
-    
+    total_generated = 0
+    TARGET_SAMPLE_RATE = 16000
+
+    if tts_engine.lower() == "vieneu":
+        print(f"Generating {max_samples} samples using VieNeu-TTS...")
+        try:
+            from vieneu import Vieneu
+        except ImportError as e:
+            raise ImportError("Failed to import vieneu. Please ensure it is installed via 'pip install vieneu'.") from e
+        
+        try:
+            # Khởi tạo Vieneu. Nó sẽ tự động dùng chế độ v3turbo chạy siêu nhẹ trên CPU thông qua ONNX
+            tts = Vieneu()  
+            preset_voices = tts.list_preset_voices()
+            if not preset_voices:
+                raise ValueError("No preset voices found in VieNeu-TTS.")
+        except Exception as e:
+            print(f"Failed to load VieNeu-TTS: {e}")
+            return
+            
+        for _ in range(max_samples):
+            t = random.choice(texts)
+            # Chọn ngẫu nhiên 1 giọng từ danh sách các preset có sẵn
+            label, voice_id = random.choice(preset_voices)
+            
+            unique_id = str(uuid.uuid4())
+            wav_path = os.path.join(output_dir, f"{unique_id}.wav")
+            
+            try:
+                # Sinh âm thanh
+                audio = tts.infer(t, voice=voice_id)
+                # Lưu vào file tạm để đọc lại dữ liệu dạng chuỗi byte một cách an toàn
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+                    tmp_path = tmp_file.name
+                
+                tts.save(audio, tmp_path)
+                
+                # Đọc lại bằng scipy
+                import scipy.io.wavfile
+                orig_sr, dat = scipy.io.wavfile.read(tmp_path)
+                
+                # Resample về chuẩn 16kHz của openWakeWord
+                if orig_sr != TARGET_SAMPLE_RATE:
+                    num_samples = int(round(len(dat) * float(TARGET_SAMPLE_RATE) / orig_sr))
+                    dat = signal.resample(dat, num_samples)
+                
+                # Chuẩn hoá về định dạng int16
+                if dat.dtype != np.int16:
+                    _MAX_WAV_VALUE = 32767.0
+                    if dat.dtype in [np.float32, np.float64]:
+                        dat = np.clip(dat * _MAX_WAV_VALUE, -_MAX_WAV_VALUE, _MAX_WAV_VALUE).astype(np.int16)
+                    else:
+                        dat = dat.astype(np.int16)
+                
+                scipy.io.wavfile.write(wav_path, TARGET_SAMPLE_RATE, dat)
+                os.remove(tmp_path)
+                total_generated += 1
+            except Exception as e:
+                print(f"Error synthesizing text '{t}' with VieNeu-TTS (voice={voice_id}): {e}")
+                if 'tmp_path' in locals() and os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+                if os.path.exists(wav_path):
+                    os.remove(wav_path)
+                    
+        print(f"Successfully generated {total_generated} samples using VieNeu-TTS in {output_dir}")
+        return
+
+    # Original Piper Logic
+    try:
+        from piper import PiperVoice, SynthesisConfig
+    except ImportError as e:
+        raise ImportError(f"Failed to import Piper. Please ensure it is installed.") from e
+
     samples_per_model = max_samples // len(piper_models)
     remaining_samples = max_samples % len(piper_models)
 
-    total_generated = 0
-
-    print(f"Generating {max_samples} samples across {len(piper_models)} models...")
+    print(f"Generating {max_samples} samples across {len(piper_models)} piper models...")
 
     for i, model_path_str in enumerate(piper_models):
         model_path = Path(model_path_str)
@@ -47,19 +113,17 @@ def generate_multi_model_samples(
             print(f"Warning: Piper model not found at {model_path_str}. Skipping...")
             continue
             
-        print(f"Loading model: {model_path_str}")
+        print(f"Loading piper model: {model_path_str}")
         try:
             # use_cuda=False by default to avoid issues, can be changed if GPU is supported
             voice = PiperVoice.load(model_path, use_cuda=False)
         except Exception as e:
-            print(f"Failed to load model {model_path_str}: {e}")
+            print(f"Failed to load piper model {model_path_str}: {e}")
             continue
             
-        # Determine how many samples to generate for this model
         target_samples = samples_per_model + (1 if i < remaining_samples else 0)
         
         for _ in range(target_samples):
-            # Randomly select parameters
             t = random.choice(texts)
             l_scale = random.choice(length_scales)
             n_scale = random.choice(noise_scales)
@@ -71,20 +135,16 @@ def generate_multi_model_samples(
                 noise_w_scale=n_w_scale
             )
             
-            # Generate unique filename
             unique_id = str(uuid.uuid4())
             wav_path = os.path.join(output_dir, f"{unique_id}.wav")
             
-            # Synthesize and write wav
             try:
-                # Resolve synthesis into a list first to catch any errors BEFORE opening the file
                 audio_chunks = list(voice.synthesize(t, syn_config))
                 if not audio_chunks:
                     print(f"Warning: No audio chunks generated for text '{t}'")
                     continue
 
                 wav_file = wave.open(wav_path, "wb")
-                TARGET_SAMPLE_RATE = 16000
                 with wav_file:
                     wav_file.setframerate(TARGET_SAMPLE_RATE)
                     wav_file.setsampwidth(audio_chunks[0].sample_width)
@@ -94,7 +154,6 @@ def generate_multi_model_samples(
                         audio = audio_chunk.audio_float_array
                         orig_sr = audio_chunk.sample_rate
                         
-                        # Resample to 16000 Hz if necessary
                         if orig_sr != TARGET_SAMPLE_RATE:
                             num_samples = int(round(len(audio) * float(TARGET_SAMPLE_RATE) / orig_sr))
                             audio = signal.resample(audio, num_samples)
@@ -103,16 +162,12 @@ def generate_multi_model_samples(
                             silence_int16_bytes = bytes(int(TARGET_SAMPLE_RATE * 0.0 * 2))
                             wav_file.writeframes(silence_int16_bytes)
                             
-                        # Convert to int16 bytes
                         _MAX_WAV_VALUE = 32767.0
                         audio_int16 = np.clip(audio * _MAX_WAV_VALUE, -_MAX_WAV_VALUE, _MAX_WAV_VALUE).astype(np.int16)
                         wav_file.writeframes(audio_int16.tobytes())
                 total_generated += 1
             except Exception as e:
-                import traceback
                 print(f"Error synthesizing text '{t}' with model {model_path_str}: {e}")
-                traceback.print_exc()
-                # Clean up empty/corrupted file if it was created
                 if os.path.exists(wav_path):
                     os.remove(wav_path)
                 

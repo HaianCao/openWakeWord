@@ -1,12 +1,12 @@
 ## Configuration file to be used with `train.py` to create custom wake word/phrase models
 
 # The name of the model (will be used when creating directoires and when saving the final .onnx and .tflite files)
-model_name: "my_model"
+model_name: "tam_mi_oi"
 
 # The target word/phrase to be detected by the model. Adding multiple unique words/phrases will
 # still only train a binary model detection model, but it will activate on any one of the provided words/phrases.
 target_phrase:
-  - "hey jarvis"
+  - "tam mi ơi"
 
 # Specific phrases that you do *not* want the model to activate on, outside of those generated automatically via phoneme overlap
 # This can be a good way to reduce false positives if you notice that, in practice, certain words or phrases are problematic
@@ -39,6 +39,10 @@ piper_models:
   - "vi_VN-vais1000-medium.onnx"
   # - "vi_VN-vivos-x_low.onnx"
   # - "vi_VN-25hours_single-low.onnx"
+
+# The TTS engine to use for generating synthetic clips. 
+# Options: "piper" (default, fast, requires .onnx models above), "vieneu" (high quality, multi-speaker, CPU/GPU)
+tts_engine: "vieneu"
 
 # The output directory for the generated synthetic clips, openwakeword features, and trained models
 # Sub-directories will be automatically created for train and test clips for both positive and negative examples
