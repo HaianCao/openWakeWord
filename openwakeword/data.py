@@ -1013,3 +1013,112 @@ def phoneme_replacement(input_chars, max_replace, replace_char='"(.){1,3}"'):
             results.append(' '.join(chars_copy))
 
     return results
+
+# Global cache for the Vietnamese syllable dictionary
+_VI_SYLLABLE_CACHE = None
+_VI_SYLLABLE_IPAS = None
+
+def generate_adversarial_texts_vi(input_text: str, N: int = 1000, include_partial_phrase: float = 0, include_input_words: float = 0):
+    """
+    Generate adversarial words and phrases based on phoneme overlap for Vietnamese.
+    Uses sea-g2p to convert graphemes to IPA phonemes and calculates Levenshtein distance.
+    """
+    import urllib.request
+    import os
+    import numpy as np
+    
+    try:
+        from sea_g2p import G2P, Normalizer
+    except ImportError:
+        import logging
+        logging.warning("sea-g2p is not installed. Cannot generate adversarial texts for Vietnamese. Returning empty list.")
+        return []
+
+    global _VI_SYLLABLE_CACHE, _VI_SYLLABLE_IPAS
+    
+    if _VI_SYLLABLE_CACHE is None:
+        # Load the 7184 common syllables
+        url = "https://gist.githubusercontent.com/hieuthi/1f5d80fca871f3642f61f7e3de883f3a/raw"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        try:
+            with urllib.request.urlopen(req) as response:
+                syllables = [line.decode('utf-8').strip() for line in response]
+            # Clean up
+            syllables = [s.lower() for s in syllables if s.isalpha() or ' ' not in s]
+            syllables = list(set(syllables))
+        except Exception as e:
+            print(f"Failed to load Vietnamese syllables dictionary: {e}")
+            syllables = ["tám", "tăm", "cam", "dam", "nam", "tan", "tap", "mì", "mĩ", "mỉ", "ni", "vi", "my", "ma", "ới", "bơi", "rơi"]
+        
+        norm = Normalizer("vi")
+        g2p = G2P("vi")
+        norm_syls = norm.normalize(syllables)
+        ipas = g2p.convert(norm_syls)
+        
+        _VI_SYLLABLE_CACHE = syllables
+        _VI_SYLLABLE_IPAS = ipas
+        
+    def levenshtein(s1, s2):
+        if len(s1) < len(s2):
+            return levenshtein(s2, s1)
+        if len(s2) == 0:
+            return len(s1)
+        previous_row = range(len(s2) + 1)
+        for i, c1 in enumerate(s1):
+            current_row = [i + 1]
+            for j, c2 in enumerate(s2):
+                insertions = previous_row[j + 1] + 1
+                deletions = current_row[j] + 1
+                substitutions = previous_row[j] + (c1 != c2)
+                current_row.append(min(insertions, deletions, substitutions))
+            previous_row = current_row
+        return previous_row[-1]
+
+    # Process target words
+    norm = Normalizer("vi")
+    g2p = G2P("vi")
+    
+    target_words = input_text.split()
+    target_norm = norm.normalize(target_words)
+    target_ipas = g2p.convert(target_norm)
+    
+    adversarial_phrases = []
+    
+    for t_word, t_ipa in zip(target_words, target_ipas):
+        distances = []
+        for s, i in zip(_VI_SYLLABLE_CACHE, _VI_SYLLABLE_IPAS):
+            if s != t_word:
+                d = levenshtein(t_ipa, i)
+                distances.append((d, s))
+        
+        distances.sort(key=lambda x: x[0])
+        
+        # Take top 100 closest syllables
+        top_syls = [s for d, s in distances[:100]]
+        
+        if len(top_syls) > 0:
+            adversarial_phrases.append(top_syls)
+        else:
+            adversarial_phrases.append([t_word])
+            
+    # Form combinations
+    adversarial_texts = []
+    for i in range(N):
+        txts = []
+        for j, k in zip(adversarial_phrases, target_words):
+            if np.random.random() > (1 - include_input_words):
+                txts.append(k)
+            else:
+                txts.append(np.random.choice(j))
+
+        if include_partial_phrase > 0 and len(target_words) > 1 and np.random.random() <= include_partial_phrase:
+            n_words = np.random.randint(1, len(target_words)+1)
+            adversarial_texts.append(" ".join(np.random.choice(txts, size=n_words, replace=False)))
+        else:
+            adversarial_texts.append(" ".join(txts))
+
+    # Remove any exact matches to input phrase
+    adversarial_texts = list(set(adversarial_texts))
+    adversarial_texts = [i for i in adversarial_texts if i != input_text]
+
+    return adversarial_texts

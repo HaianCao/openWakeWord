@@ -710,8 +710,17 @@ if __name__ == '__main__':
             os.mkdir(negative_train_output_dir)
         n_current_samples = len(os.listdir(negative_train_output_dir))
         if n_current_samples <= 0.95*config["n_samples"]:
-            adversarial_texts = config["custom_negative_phrases"]
-            # Skip English adversarial generation for Vietnamese models
+            adversarial_texts = config.get("custom_negative_phrases", [])
+            
+            # Automatically generate Vietnamese adversarial phrases
+            try:
+                from openwakeword.data import generate_adversarial_texts_vi
+                target_phrases = config["target_phrase"] if isinstance(config["target_phrase"], list) else [config["target_phrase"]]
+                for tp in target_phrases:
+                    adversarial_texts.extend(generate_adversarial_texts_vi(tp, N=config.get("n_adversarial_texts", 10000)))
+            except Exception as e:
+                logging.warning(f"Failed to generate Vietnamese adversarial texts: {e}")
+                
             generate_multi_model_samples(
                 text=adversarial_texts, max_samples=config["n_samples"]-n_current_samples,
                 piper_models=config["piper_models"],
@@ -729,8 +738,17 @@ if __name__ == '__main__':
             os.mkdir(negative_test_output_dir)
         n_current_samples = len(os.listdir(negative_test_output_dir))
         if n_current_samples <= 0.95*config["n_samples_val"]:
-            adversarial_texts = config["custom_negative_phrases"]
-            # Skip English adversarial generation for Vietnamese models
+            adversarial_texts = config.get("custom_negative_phrases", [])
+            
+            # Automatically generate Vietnamese adversarial phrases
+            try:
+                from openwakeword.data import generate_adversarial_texts_vi
+                target_phrases = config["target_phrase"] if isinstance(config["target_phrase"], list) else [config["target_phrase"]]
+                for tp in target_phrases:
+                    adversarial_texts.extend(generate_adversarial_texts_vi(tp, N=config.get("n_adversarial_texts", 10000)))
+            except Exception as e:
+                logging.warning(f"Failed to generate Vietnamese adversarial texts: {e}")
+                
             generate_multi_model_samples(
                 text=adversarial_texts, max_samples=config["n_samples_val"]-n_current_samples,
                 piper_models=config["piper_models"],
