@@ -26,9 +26,6 @@ import numpy as np
 import itertools
 import pronouncing
 import torch
-import torchaudio
-if not hasattr(torchaudio, 'set_audio_backend'):
-    torchaudio.set_audio_backend = lambda x: None
 import audiomentations
 import torch_audiomentations
 from numpy.lib.format import open_memmap
