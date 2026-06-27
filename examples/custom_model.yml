@@ -31,7 +31,7 @@ tts_batch_size: 50
 # Set to 1 for sequential, or higher to parallelize across CPU cores
 # Each worker loads the full Piper model (~1.5GB RAM). 
 # Recommended: 4-8 workers max on Colab (12-13GB RAM) to avoid OOM
-num_workers: 4
+num_workers: 2
 
 # The batch size to use when performing data augmentation on generated clips prior to training
 # It's recommended that this not be too large to ensure that there is enough variety in the augmentation

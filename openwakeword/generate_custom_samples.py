@@ -20,23 +20,23 @@ def _generate_samples_worker(args: Tuple) -> int:
     
     Args:
         args: Tuple of (model_path_str, texts, target_samples, output_dir, 
-                       length_scales, noise_scales, noise_scale_ws, use_cuda, worker_id)
+                       length_scales, noise_scales, noise_scale_ws, use_cuda)
     
     Returns:
         Number of samples successfully generated
     """
     (model_path_str, texts, target_samples, output_dir, 
-     length_scales, noise_scales, noise_scale_ws, use_cuda, worker_id) = args
+     length_scales, noise_scales, noise_scale_ws, use_cuda) = args
     
     try:
         from piper import PiperVoice, SynthesisConfig
     except ImportError as e:
-        print(f"Worker {worker_id}: Failed to import Piper: {e}")
+        print(f"Failed to import Piper: {e}")
         return 0
     
     model_path = Path(model_path_str)
     if not model_path.exists():
-        print(f"Worker {worker_id}: Model not found at {model_path_str}")
+        print(f"Model not found at {model_path_str}")
         return 0
     
     try:
@@ -46,25 +46,16 @@ def _generate_samples_worker(args: Tuple) -> int:
             try:
                 voice = PiperVoice.load(model_path, use_cuda=False)
             except Exception as e2:
-                print(f"Worker {worker_id}: Failed to load model {model_path_str}: {e2}")
+                print(f"Failed to load model {model_path_str}: {e2}")
                 return 0
         else:
-            print(f"Worker {worker_id}: Failed to load model {model_path_str}: {e}")
+            print(f"Failed to load model {model_path_str}: {e}")
             return 0
     
     generated = 0
     TARGET_SAMPLE_RATE = 16000
     
-    # Progress bar for this worker (position=worker_id for multi-process display)
-    pbar = tqdm(
-        range(target_samples), 
-        desc=f"Worker {worker_id} [{model_path.name}]", 
-        unit="sample",
-        position=worker_id,
-        leave=False
-    )
-    
-    for _ in pbar:
+    for _ in range(target_samples):
         t = random.choice(texts)
         l_scale = random.choice(length_scales)
         n_scale = random.choice(noise_scales)
@@ -110,7 +101,6 @@ def _generate_samples_worker(args: Tuple) -> int:
             if os.path.exists(wav_path):
                 os.remove(wav_path)
     
-    pbar.close()
     return generated
 
 
@@ -164,12 +154,11 @@ def generate_multi_model_samples(
         # Default: 2 workers per model, capped at 8 total to avoid memory issues
         # Each Piper model load uses ~1-2GB RAM
         num_workers = min(8, len(valid_models) * 2)
+    # Respect user config, but cap at CPU count
     num_workers = max(1, min(num_workers, cpu_count()))
     
-    # Warn if too many workers for available memory
-    import psutil
+    # Memory check
     available_gb = psutil.virtual_memory().available / (1024**3)
-    # Estimate: each worker loads model (~1.5GB) + overhead
     estimated_memory_gb = num_workers * 1.5
     if estimated_memory_gb > available_gb * 0.8:
         recommended = max(1, int(available_gb * 0.8 / 1.5))
@@ -178,7 +167,10 @@ def generate_multi_model_samples(
         print(f"   Auto-limiting to {recommended} workers...")
         num_workers = recommended
     
-    print(f"Generating {max_samples} samples across {len(valid_models)} models using {num_workers} workers...")
+    # Final cap at CPU count (Colab free = 2, Pro = more)
+    num_workers = min(num_workers, cpu_count())
+    
+    print(f"Generating {max_samples} samples across {len(valid_models)} models using {num_workers} workers (CPU cores: {cpu_count()})...")
     
     # Distribute samples across models
     samples_per_model = max_samples // len(valid_models)
@@ -198,10 +190,9 @@ def generate_multi_model_samples(
             for w in range(workers_for_model):
                 worker_samples = samples_per_worker + (1 if w < extra else 0)
                 if worker_samples > 0:
-                    worker_id = len(work_items)
                     work_items.append((
                         model_path, texts, worker_samples, output_dir,
-                        length_scales, noise_scales, noise_scale_ws, use_cuda, worker_id
+                        length_scales, noise_scales, noise_scale_ws, use_cuda
                     ))
     
     # If we have fewer work items than workers, adjust
@@ -210,10 +201,13 @@ def generate_multi_model_samples(
     if actual_workers < num_workers:
         print(f"Note: Adjusted to {actual_workers} workers (limited by samples per model)")
     
-    # Run multiprocessing
+    # Run multiprocessing with single progress bar in main process
     total_generated = 0
     with Pool(processes=actual_workers) as pool:
-        results = pool.map(_generate_samples_worker, work_items)
-        total_generated = sum(results)
+        # Use imap_unordered for progress tracking as results complete
+        with tqdm(total=max_samples, desc="Generating samples", unit="sample") as pbar:
+            for result in pool.imap_unordered(_generate_samples_worker, work_items):
+                total_generated += result
+                pbar.update(result)
     
     print(f"Successfully generated {total_generated} samples in {output_dir}")
