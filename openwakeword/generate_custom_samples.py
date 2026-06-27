@@ -7,6 +7,7 @@ import numpy as np
 from scipy import signal
 from pathlib import Path
 from typing import List, Union
+import torch
 
 def generate_multi_model_samples(
     text: Union[str, List[str]],
@@ -41,6 +42,13 @@ def generate_multi_model_samples(
 
     print(f"Generating {max_samples} samples across {len(piper_models)} models...")
 
+    # Auto-detect GPU for Piper TTS
+    use_cuda = torch.cuda.is_available()
+    if use_cuda:
+        print("GPU detected - using CUDA for Piper TTS")
+    else:
+        print("No GPU detected - using CPU for Piper TTS")
+
     for i, model_path_str in enumerate(piper_models):
         model_path = Path(model_path_str)
         if not model_path.exists():
@@ -49,11 +57,19 @@ def generate_multi_model_samples(
             
         print(f"Loading model: {model_path_str}")
         try:
-            # use_cuda=False by default to avoid issues, can be changed if GPU is supported
-            voice = PiperVoice.load(model_path, use_cuda=False)
+            voice = PiperVoice.load(model_path, use_cuda=use_cuda)
         except Exception as e:
-            print(f"Failed to load model {model_path_str}: {e}")
-            continue
+            if use_cuda:
+                print(f"CUDA load failed ({e}), falling back to CPU...")
+                try:
+                    voice = PiperVoice.load(model_path, use_cuda=False)
+                    use_cuda = False  # stay on CPU for subsequent models
+                except Exception as e2:
+                    print(f"Failed to load model {model_path_str} on CPU either: {e2}")
+                    continue
+            else:
+                print(f"Failed to load model {model_path_str}: {e}")
+                continue
             
         # Determine how many samples to generate for this model
         target_samples = samples_per_model + (1 if i < remaining_samples else 0)
