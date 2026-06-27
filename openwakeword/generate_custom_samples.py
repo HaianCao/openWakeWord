@@ -8,6 +8,7 @@ from scipy import signal
 from pathlib import Path
 from typing import List, Union
 import torch
+from tqdm import tqdm
 
 def generate_multi_model_samples(
     text: Union[str, List[str]],
@@ -74,7 +75,8 @@ def generate_multi_model_samples(
         # Determine how many samples to generate for this model
         target_samples = samples_per_model + (1 if i < remaining_samples else 0)
         
-        for _ in range(target_samples):
+        # Progress bar for sample generation
+        for _ in tqdm(range(target_samples), desc=f"Generating [{model_path.name}]", unit="sample"):
             # Randomly select parameters
             t = random.choice(texts)
             l_scale = random.choice(length_scales)
