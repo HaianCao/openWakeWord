@@ -682,6 +682,7 @@ if __name__ == '__main__':
                 piper_src_path=config["piper_src_path"],
                 noise_scales=[0.98], noise_scale_ws=[0.98], length_scales=[0.75, 1.0, 1.25],
                 output_dir=positive_train_output_dir,
+                num_workers=config.get("num_workers", 1),
             )
             torch.cuda.empty_cache()
         else:
@@ -699,6 +700,7 @@ if __name__ == '__main__':
                 piper_src_path=config["piper_src_path"],
                 noise_scales=[1.0], noise_scale_ws=[1.0], length_scales=[0.75, 1.0, 1.25],
                 output_dir=positive_test_output_dir,
+                num_workers=config.get("num_workers", 1),
             )
             torch.cuda.empty_cache()
         else:
@@ -733,6 +735,7 @@ if __name__ == '__main__':
                 piper_src_path=config["piper_src_path"],
                 noise_scales=[0.98], noise_scale_ws=[0.98], length_scales=[0.75, 1.0, 1.25],
                 output_dir=negative_train_output_dir,
+                num_workers=config.get("num_workers", 1),
             )
             torch.cuda.empty_cache()
         else:
@@ -767,6 +770,7 @@ if __name__ == '__main__':
                 piper_src_path=config["piper_src_path"],
                 noise_scales=[1.0], noise_scale_ws=[1.0], length_scales=[0.75, 1.0, 1.25],
                 output_dir=negative_test_output_dir,
+                num_workers=config.get("num_workers", 1),
             )
             torch.cuda.empty_cache()
         else:

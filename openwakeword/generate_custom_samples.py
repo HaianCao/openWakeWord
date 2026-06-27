@@ -6,9 +6,112 @@ import wave
 import numpy as np
 from scipy import signal
 from pathlib import Path
-from typing import List, Union
+from typing import List, Union, Tuple
 import torch
 from tqdm import tqdm
+from multiprocessing import Pool, cpu_count
+import math
+
+# Worker function for multiprocessing - must be at module level for pickling
+def _generate_samples_worker(args: Tuple) -> int:
+    """
+    Worker function to generate samples for a single model in a separate process.
+    
+    Args:
+        args: Tuple of (model_path_str, texts, target_samples, output_dir, 
+                       length_scales, noise_scales, noise_scale_ws, use_cuda, worker_id)
+    
+    Returns:
+        Number of samples successfully generated
+    """
+    (model_path_str, texts, target_samples, output_dir, 
+     length_scales, noise_scales, noise_scale_ws, use_cuda, worker_id) = args
+    
+    try:
+        from piper import PiperVoice, SynthesisConfig
+    except ImportError as e:
+        print(f"Worker {worker_id}: Failed to import Piper: {e}")
+        return 0
+    
+    model_path = Path(model_path_str)
+    if not model_path.exists():
+        print(f"Worker {worker_id}: Model not found at {model_path_str}")
+        return 0
+    
+    try:
+        voice = PiperVoice.load(model_path, use_cuda=use_cuda)
+    except Exception as e:
+        if use_cuda:
+            try:
+                voice = PiperVoice.load(model_path, use_cuda=False)
+            except Exception as e2:
+                print(f"Worker {worker_id}: Failed to load model {model_path_str}: {e2}")
+                return 0
+        else:
+            print(f"Worker {worker_id}: Failed to load model {model_path_str}: {e}")
+            return 0
+    
+    generated = 0
+    TARGET_SAMPLE_RATE = 16000
+    
+    # Progress bar for this worker (position=worker_id for multi-process display)
+    pbar = tqdm(
+        range(target_samples), 
+        desc=f"Worker {worker_id} [{model_path.name}]", 
+        unit="sample",
+        position=worker_id,
+        leave=False
+    )
+    
+    for _ in pbar:
+        t = random.choice(texts)
+        l_scale = random.choice(length_scales)
+        n_scale = random.choice(noise_scales)
+        n_w_scale = random.choice(noise_scale_ws)
+        
+        syn_config = SynthesisConfig(
+            length_scale=l_scale,
+            noise_scale=n_scale,
+            noise_w_scale=n_w_scale
+        )
+        
+        unique_id = str(uuid.uuid4())
+        wav_path = os.path.join(output_dir, f"{unique_id}.wav")
+        
+        try:
+            audio_chunks = list(voice.synthesize(t, syn_config))
+            if not audio_chunks:
+                continue
+            
+            wav_file = wave.open(wav_path, "wb")
+            with wav_file:
+                wav_file.setframerate(TARGET_SAMPLE_RATE)
+                wav_file.setsampwidth(audio_chunks[0].sample_width)
+                wav_file.setnchannels(audio_chunks[0].sample_channels)
+                
+                for i_chunk, audio_chunk in enumerate(audio_chunks):
+                    audio = audio_chunk.audio_float_array
+                    orig_sr = audio_chunk.sample_rate
+                    
+                    if orig_sr != TARGET_SAMPLE_RATE:
+                        num_samples = int(round(len(audio) * float(TARGET_SAMPLE_RATE) / orig_sr))
+                        audio = signal.resample(audio, num_samples)
+                    
+                    if i_chunk > 0:
+                        silence_int16_bytes = bytes(int(TARGET_SAMPLE_RATE * 0.0 * 2))
+                        wav_file.writeframes(silence_int16_bytes)
+                    
+                    _MAX_WAV_VALUE = 32767.0
+                    audio_int16 = np.clip(audio * _MAX_WAV_VALUE, -_MAX_WAV_VALUE, _MAX_WAV_VALUE).astype(np.int16)
+                    wav_file.writeframes(audio_int16.tobytes())
+            generated += 1
+        except Exception as e:
+            if os.path.exists(wav_path):
+                os.remove(wav_path)
+    
+    pbar.close()
+    return generated
+
 
 def generate_multi_model_samples(
     text: Union[str, List[str]],
@@ -18,17 +121,23 @@ def generate_multi_model_samples(
     output_dir: str,
     length_scales: List[float] = [0.75, 1.0, 1.25],
     noise_scales: List[float] = [0.98],
-    noise_scale_ws: List[float] = [0.98]
+    noise_scale_ws: List[float] = [0.98],
+    num_workers: int = None
 ):
     """
-    Generate synthetic TTS samples using multiple Piper ONNX models.
+    Generate synthetic TTS samples using multiple Piper ONNX models with multiprocessing.
+    
+    Args:
+        text: Target text(s) to synthesize
+        max_samples: Total number of samples to generate
+        piper_models: List of paths to Piper ONNX models
+        piper_src_path: Path to piper source (kept for compatibility)
+        output_dir: Output directory for generated WAV files
+        length_scales: List of length scale values for variation
+        noise_scales: List of noise scale values for variation
+        noise_scale_ws: List of noise width scale values for variation
+        num_workers: Number of worker processes (default: min(CPU count, len(piper_models) * 2))
     """
-    # Import Piper (installed via pip)
-    try:
-        from piper import PiperVoice, SynthesisConfig
-    except ImportError as e:
-        raise ImportError(f"Failed to import Piper. Please ensure it is installed.") from e
-
     if isinstance(text, str):
         texts = [text]
     else:
@@ -36,102 +145,57 @@ def generate_multi_model_samples(
 
     os.makedirs(output_dir, exist_ok=True)
     
-    samples_per_model = max_samples // len(piper_models)
-    remaining_samples = max_samples % len(piper_models)
-
-    total_generated = 0
-
-    print(f"Generating {max_samples} samples across {len(piper_models)} models...")
-
+    # Filter valid models
+    valid_models = [m for m in piper_models if Path(m).exists()]
+    if not valid_models:
+        print("Error: No valid Piper models found!")
+        return
+    
     # Auto-detect GPU for Piper TTS
     use_cuda = torch.cuda.is_available()
     if use_cuda:
         print("GPU detected - using CUDA for Piper TTS")
     else:
         print("No GPU detected - using CPU for Piper TTS")
-
-    for i, model_path_str in enumerate(piper_models):
-        model_path = Path(model_path_str)
-        if not model_path.exists():
-            print(f"Warning: Piper model not found at {model_path_str}. Skipping...")
-            continue
-            
-        print(f"Loading model: {model_path_str}")
-        try:
-            voice = PiperVoice.load(model_path, use_cuda=use_cuda)
-        except Exception as e:
-            if use_cuda:
-                print(f"CUDA load failed ({e}), falling back to CPU...")
-                try:
-                    voice = PiperVoice.load(model_path, use_cuda=False)
-                    use_cuda = False  # stay on CPU for subsequent models
-                except Exception as e2:
-                    print(f"Failed to load model {model_path_str} on CPU either: {e2}")
-                    continue
-            else:
-                print(f"Failed to load model {model_path_str}: {e}")
-                continue
-            
-        # Determine how many samples to generate for this model
+    
+    # Determine number of workers
+    if num_workers is None:
+        # Use at most 2 workers per model, but cap at CPU count
+        num_workers = min(cpu_count(), len(valid_models) * 2)
+    num_workers = max(1, min(num_workers, cpu_count()))
+    
+    print(f"Generating {max_samples} samples across {len(valid_models)} models using {num_workers} workers...")
+    
+    # Distribute samples across models
+    samples_per_model = max_samples // len(valid_models)
+    remaining_samples = max_samples % len(valid_models)
+    
+    # Prepare work items: each model gets its own worker(s)
+    work_items = []
+    for i, model_path in enumerate(valid_models):
         target_samples = samples_per_model + (1 if i < remaining_samples else 0)
-        
-        # Progress bar for sample generation
-        for _ in tqdm(range(target_samples), desc=f"Generating [{model_path.name}]", unit="sample"):
-            # Randomly select parameters
-            t = random.choice(texts)
-            l_scale = random.choice(length_scales)
-            n_scale = random.choice(noise_scales)
-            n_w_scale = random.choice(noise_scale_ws)
+        if target_samples > 0:
+            # Split this model's work across multiple workers if we have extra workers
+            workers_for_model = max(1, num_workers // len(valid_models))
+            samples_per_worker = target_samples // workers_for_model
+            extra = target_samples % workers_for_model
             
-            syn_config = SynthesisConfig(
-                length_scale=l_scale,
-                noise_scale=n_scale,
-                noise_w_scale=n_w_scale
-            )
-            
-            # Generate unique filename
-            unique_id = str(uuid.uuid4())
-            wav_path = os.path.join(output_dir, f"{unique_id}.wav")
-            
-            # Synthesize and write wav
-            try:
-                # Resolve synthesis into a list first to catch any errors BEFORE opening the file
-                audio_chunks = list(voice.synthesize(t, syn_config))
-                if not audio_chunks:
-                    print(f"Warning: No audio chunks generated for text '{t}'")
-                    continue
-
-                wav_file = wave.open(wav_path, "wb")
-                TARGET_SAMPLE_RATE = 16000
-                with wav_file:
-                    wav_file.setframerate(TARGET_SAMPLE_RATE)
-                    wav_file.setsampwidth(audio_chunks[0].sample_width)
-                    wav_file.setnchannels(audio_chunks[0].sample_channels)
-                    
-                    for i_chunk, audio_chunk in enumerate(audio_chunks):
-                        audio = audio_chunk.audio_float_array
-                        orig_sr = audio_chunk.sample_rate
-                        
-                        # Resample to 16000 Hz if necessary
-                        if orig_sr != TARGET_SAMPLE_RATE:
-                            num_samples = int(round(len(audio) * float(TARGET_SAMPLE_RATE) / orig_sr))
-                            audio = signal.resample(audio, num_samples)
-                            
-                        if i_chunk > 0:
-                            silence_int16_bytes = bytes(int(TARGET_SAMPLE_RATE * 0.0 * 2))
-                            wav_file.writeframes(silence_int16_bytes)
-                            
-                        # Convert to int16 bytes
-                        _MAX_WAV_VALUE = 32767.0
-                        audio_int16 = np.clip(audio * _MAX_WAV_VALUE, -_MAX_WAV_VALUE, _MAX_WAV_VALUE).astype(np.int16)
-                        wav_file.writeframes(audio_int16.tobytes())
-                total_generated += 1
-            except Exception as e:
-                import traceback
-                print(f"Error synthesizing text '{t}' with model {model_path_str}: {e}")
-                traceback.print_exc()
-                # Clean up empty/corrupted file if it was created
-                if os.path.exists(wav_path):
-                    os.remove(wav_path)
-                
+            for w in range(workers_for_model):
+                worker_samples = samples_per_worker + (1 if w < extra else 0)
+                if worker_samples > 0:
+                    worker_id = len(work_items)
+                    work_items.append((
+                        model_path, texts, worker_samples, output_dir,
+                        length_scales, noise_scales, noise_scale_ws, use_cuda, worker_id
+                    ))
+    
+    # If we have fewer work items than workers, adjust
+    actual_workers = min(num_workers, len(work_items))
+    
+    # Run multiprocessing
+    total_generated = 0
+    with Pool(processes=actual_workers) as pool:
+        results = pool.map(_generate_samples_worker, work_items)
+        total_generated = sum(results)
+    
     print(f"Successfully generated {total_generated} samples in {output_dir}")

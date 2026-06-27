@@ -27,9 +27,14 @@ n_samples_val: 2000
 # The batch size to use with Piper TTS when generating synthetic training data
 tts_batch_size: 50
 
+# Number of worker processes for parallel Piper TTS generation (uses multiprocessing)
+# Set to 1 for sequential, or higher to parallelize across CPU cores
+# Recommended: min(8, num_cpu_cores) for Piper TTS to avoid memory issues
+num_workers: 16
+
 # The batch size to use when performing data augmentation on generated clips prior to training
 # It's recommended that this not be too large to ensure that there is enough variety in the augmentation
-augmentation_batch_size: 16
+augmentation_batch_size: 64
 
 # The path to the piper1-gpl src directory for TTS
 piper_src_path: "../piper1-gpl/src"
@@ -89,9 +94,9 @@ feature_data_files:
 # that batch sizes of 1024-4096 work well in practice.
 
 batch_n_per_class:
-  "ACAV100M_sample": 1024
-  "adversarial_negative": 50
-  "positive": 50
+  "ACAV100M_sample": 2048
+  "adversarial_negative": 100
+  "positive": 100
 
 # Define the type of size of the openwakeword model to train. Increasing the layer size
 # may result in a more capable model, at the cost of decreased inference speed. The default
