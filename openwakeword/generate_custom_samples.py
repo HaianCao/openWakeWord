@@ -11,6 +11,7 @@ import torch
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
 import math
+import psutil
 
 # Worker function for multiprocessing - must be at module level for pickling
 def _generate_samples_worker(args: Tuple) -> int:
@@ -160,9 +161,22 @@ def generate_multi_model_samples(
     
     # Determine number of workers
     if num_workers is None:
-        # Use at most 2 workers per model, but cap at CPU count
-        num_workers = min(cpu_count(), len(valid_models) * 2)
+        # Default: 2 workers per model, capped at 8 total to avoid memory issues
+        # Each Piper model load uses ~1-2GB RAM
+        num_workers = min(8, len(valid_models) * 2)
     num_workers = max(1, min(num_workers, cpu_count()))
+    
+    # Warn if too many workers for available memory
+    import psutil
+    available_gb = psutil.virtual_memory().available / (1024**3)
+    # Estimate: each worker loads model (~1.5GB) + overhead
+    estimated_memory_gb = num_workers * 1.5
+    if estimated_memory_gb > available_gb * 0.8:
+        recommended = max(1, int(available_gb * 0.8 / 1.5))
+        print(f"⚠️  Warning: {num_workers} workers may need ~{estimated_memory_gb:.1f}GB RAM")
+        print(f"   Available: {available_gb:.1f}GB. Recommended: {recommended} workers")
+        print(f"   Auto-limiting to {recommended} workers...")
+        num_workers = recommended
     
     print(f"Generating {max_samples} samples across {len(valid_models)} models using {num_workers} workers...")
     
@@ -175,8 +189,9 @@ def generate_multi_model_samples(
     for i, model_path in enumerate(valid_models):
         target_samples = samples_per_model + (1 if i < remaining_samples else 0)
         if target_samples > 0:
-            # Split this model's work across multiple workers if we have extra workers
-            workers_for_model = max(1, num_workers // len(valid_models))
+            # Limit workers per model to avoid duplicate model loading in memory
+            max_workers_per_model = min(4, num_workers // len(valid_models))
+            workers_for_model = max(1, min(max_workers_per_model, num_workers // len(valid_models)))
             samples_per_worker = target_samples // workers_for_model
             extra = target_samples % workers_for_model
             
@@ -191,6 +206,9 @@ def generate_multi_model_samples(
     
     # If we have fewer work items than workers, adjust
     actual_workers = min(num_workers, len(work_items))
+    
+    if actual_workers < num_workers:
+        print(f"Note: Adjusted to {actual_workers} workers (limited by samples per model)")
     
     # Run multiprocessing
     total_generated = 0
