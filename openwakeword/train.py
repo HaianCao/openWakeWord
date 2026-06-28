@@ -737,7 +737,7 @@ if __name__ == '__main__':
                     from openwakeword.data import generate_adversarial_texts_vi
                     target_phrases = config["target_phrase"] if isinstance(config["target_phrase"], list) else [config["target_phrase"]]
                     for tp in target_phrases:
-                        adversarial_texts.extend(generate_adversarial_texts_vi(tp, N=config.get("n_adversarial_texts", 10000)))
+                        adversarial_texts.extend(generate_adversarial_texts_vi(tp, N=config["n_samples"] // len(target_phrases)))
                 except Exception as e:
                     logging.warning(f"Failed to generate Vietnamese adversarial texts: {e}")
             
@@ -765,7 +765,7 @@ if __name__ == '__main__':
                     from openwakeword.data import generate_adversarial_texts_vi
                     target_phrases = config["target_phrase"] if isinstance(config["target_phrase"], list) else [config["target_phrase"]]
                     for tp in target_phrases:
-                        adversarial_texts.extend(generate_adversarial_texts_vi(tp, N=config.get("n_adversarial_texts", 10000)))
+                        adversarial_texts.extend(generate_adversarial_texts_vi(tp, N=config["n_samples_val"] // len(target_phrases)))
                 except Exception as e:
                     logging.warning(f"Failed to generate Vietnamese adversarial texts: {e}")
             
