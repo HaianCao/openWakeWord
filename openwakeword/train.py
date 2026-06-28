@@ -18,6 +18,7 @@ from pathlib import Path
 import openwakeword
 from openwakeword.data import generate_adversarial_texts, augment_clips, mmap_batch_generator
 from openwakeword.utils import compute_features_from_generator
+from openwakeword.generate_custom_samples import generate_samples_vieneu
 from openwakeword.utils import AudioFeatures
 
 
@@ -669,6 +670,36 @@ if __name__ == '__main__':
     for background_path, duplication_rate in zip(config["background_paths"], config["background_paths_duplication_rate"]):
         background_paths.extend([i.path for i in os.scandir(background_path)]*duplication_rate)
 
+    # ── TTS dispatch helper ──────────────────────────────────────────────────
+    _tts_engine = config.get("tts_engine", "piper").lower()
+
+    def _generate_clips(texts, max_samples, output_dir, piper_noise_scales, piper_noise_scale_ws):
+        """Dispatch to Piper or VieNeu based on config["tts_engine"]."""
+        if _tts_engine == "vieneu":
+            generate_samples_vieneu(
+                texts=texts if isinstance(texts, list) else [texts],
+                max_samples=max_samples,
+                output_dir=output_dir,
+                vieneu_repo=config.get("vieneu_repo", "pnnbao-ump/VieNeu-TTS-v3-Turbo"),
+                vieneu_voices=config.get("vieneu_voices", None),   # list or None → auto all presets
+                vieneu_ref_audio=config.get("vieneu_ref_audio", None),
+                vieneu_emotion=config.get("vieneu_emotion", "natural"),
+                batch_size=config.get("vieneu_batch_size", 4),
+                hf_token=config.get("hf_token", None),
+            )
+        else:  # default: piper
+            generate_multi_model_samples(
+                text=texts, max_samples=max_samples,
+                piper_models=config["piper_models"],
+                piper_src_path=config["piper_src_path"],
+                noise_scales=piper_noise_scales,
+                noise_scale_ws=piper_noise_scale_ws,
+                length_scales=[0.75, 1.0, 1.25],
+                output_dir=output_dir,
+                num_workers=config.get("num_workers", 1),
+            )
+        torch.cuda.empty_cache()
+
     if args.generate_clips is True:
         # Generate positive clips for training
         logging.info("#"*50 + "\nGenerating positive clips for training\n" + "#"*50)
@@ -676,15 +707,8 @@ if __name__ == '__main__':
             os.mkdir(positive_train_output_dir)
         n_current_samples = len(os.listdir(positive_train_output_dir))
         if n_current_samples <= 0.95*config["n_samples"]:
-            generate_multi_model_samples(
-                text=config["target_phrase"], max_samples=config["n_samples"]-n_current_samples,
-                piper_models=config["piper_models"],
-                piper_src_path=config["piper_src_path"],
-                noise_scales=[0.98], noise_scale_ws=[0.98], length_scales=[0.75, 1.0, 1.25],
-                output_dir=positive_train_output_dir,
-                num_workers=config.get("num_workers", 1),
-            )
-            torch.cuda.empty_cache()
+            _generate_clips(config["target_phrase"], config["n_samples"]-n_current_samples,
+                            positive_train_output_dir, [0.98], [0.98])
         else:
             logging.warning(f"Skipping generation of positive clips for training, as ~{config['n_samples']} already exist")
 
@@ -694,15 +718,8 @@ if __name__ == '__main__':
             os.mkdir(positive_test_output_dir)
         n_current_samples = len(os.listdir(positive_test_output_dir))
         if n_current_samples <= 0.95*config["n_samples_val"]:
-            generate_multi_model_samples(
-                text=config["target_phrase"], max_samples=config["n_samples_val"]-n_current_samples,
-                piper_models=config["piper_models"],
-                piper_src_path=config["piper_src_path"],
-                noise_scales=[1.0], noise_scale_ws=[1.0], length_scales=[0.75, 1.0, 1.25],
-                output_dir=positive_test_output_dir,
-                num_workers=config.get("num_workers", 1),
-            )
-            torch.cuda.empty_cache()
+            _generate_clips(config["target_phrase"], config["n_samples_val"]-n_current_samples,
+                            positive_test_output_dir, [1.0], [1.0])
         else:
             logging.warning(f"Skipping generation of positive clips testing, as ~{config['n_samples_val']} already exist")
 
@@ -729,15 +746,8 @@ if __name__ == '__main__':
                 adversarial_texts = ["không", "có", "tôi", "bạn", "làm", "đi", "chào"]
                 
                 
-            generate_multi_model_samples(
-                text=adversarial_texts, max_samples=config["n_samples"]-n_current_samples,
-                piper_models=config["piper_models"],
-                piper_src_path=config["piper_src_path"],
-                noise_scales=[0.98], noise_scale_ws=[0.98], length_scales=[0.75, 1.0, 1.25],
-                output_dir=negative_train_output_dir,
-                num_workers=config.get("num_workers", 1),
-            )
-            torch.cuda.empty_cache()
+            _generate_clips(adversarial_texts, config["n_samples"]-n_current_samples,
+                            negative_train_output_dir, [0.98], [0.98])
         else:
             logging.warning(f"Skipping generation of negative clips for training, as ~{config['n_samples']} already exist")
 
@@ -762,17 +772,9 @@ if __name__ == '__main__':
             # Đảm bảo không bị lỗi mảng rỗng nếu tắt adversarial
             if len(adversarial_texts) == 0:
                 adversarial_texts = ["không", "có", "tôi", "bạn", "làm", "đi", "chào"]
-                
-                
-            generate_multi_model_samples(
-                text=adversarial_texts, max_samples=config["n_samples_val"]-n_current_samples,
-                piper_models=config["piper_models"],
-                piper_src_path=config["piper_src_path"],
-                noise_scales=[1.0], noise_scale_ws=[1.0], length_scales=[0.75, 1.0, 1.25],
-                output_dir=negative_test_output_dir,
-                num_workers=config.get("num_workers", 1),
-            )
-            torch.cuda.empty_cache()
+
+            _generate_clips(adversarial_texts, config["n_samples_val"]-n_current_samples,
+                            negative_test_output_dir, [1.0], [1.0])
         else:
             logging.warning(f"Skipping generation of negative clips for testing, as ~{config['n_samples_val']} already exist")
 

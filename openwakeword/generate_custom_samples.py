@@ -6,12 +6,16 @@ import wave
 import numpy as np
 from scipy import signal
 from pathlib import Path
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Optional
 import torch
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
 import math
 import psutil
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Piper TTS backend (multiprocess, existing code — DO NOT MODIFY)
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Worker function for multiprocessing - must be at module level for pickling
 def _generate_samples_worker(args: Tuple) -> int:
@@ -211,3 +215,163 @@ def generate_multi_model_samples(
                 pbar.update(result)
     
     print(f"Successfully generated {total_generated} samples in {output_dir}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VieNeu-TTS v3 Turbo backend (GPU-accelerated, single process)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def generate_samples_vieneu(
+    texts: List[str],
+    max_samples: int,
+    output_dir: str,
+    vieneu_repo: str = "pnnbao-ump/VieNeu-TTS-v3-Turbo",
+    vieneu_voices: Optional[List[str]] = None,
+    vieneu_ref_audio: Optional[str] = None,
+    vieneu_emotion: str = "natural",
+    batch_size: int = 4,
+    hf_token: Optional[str] = None,
+    target_sr: int = 16000,
+):
+    """
+    Generate synthetic TTS samples using VieNeu-TTS v3 Turbo.
+
+    Runs entirely in the CURRENT process (no subprocess / multiprocessing).
+    The model is loaded once on GPU (if available, else CPU via ONNX), then
+    clips are synthesised while **randomly cycling through ALL available preset
+    voices** to maximise speaker diversity — mirroring what Piper does with
+    multiple model files.
+
+    Args:
+        texts:           Pool of texts to sample from randomly.
+        max_samples:     Total number of WAV clips to generate.
+        output_dir:      Directory to write generated WAV files.
+        vieneu_repo:     HuggingFace repo ID for the VieNeu v3-Turbo backbone.
+        vieneu_voices:   Explicit list of preset voice names to cycle through
+                         (e.g. ["Tuyen", "Thu", "Nam"]).
+                         • None / [] → use ALL available preset voices (auto).
+                         • ["default"] → use the model default voice only.
+        vieneu_ref_audio: Path to a reference WAV for zero-shot voice cloning.
+                         When provided, OVERRIDES vieneu_voices for every clip.
+        vieneu_emotion:  Emotion style ("natural", "happy", …).
+        batch_size:      Clips per inner loop iteration. On a T4 GPU, 4–8 is
+                         safe; increase for higher throughput.
+        hf_token:        HuggingFace token for private/gated model access.
+        target_sr:       Output sample rate (must be 16000 for openWakeWord).
+    """
+    try:
+        from scipy.signal import resample_poly
+        from math import gcd
+        import scipy.io.wavfile as wav_io
+        from vieneu import Vieneu
+    except ImportError as e:
+        print(f"[VieNeu] Cannot import required libraries: {e}")
+        print("[VieNeu] Install with: pip install vieneu scipy")
+        return
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # ── Determine device ──────────────────────────────────────────────────────
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"[VieNeu] Loading v3-Turbo on {device.upper()} …")
+
+    # ── Load model (once) ─────────────────────────────────────────────────────
+    try:
+        init_kwargs: dict = dict(backbone_repo=vieneu_repo, device=device)
+        if hf_token:
+            init_kwargs["hf_token"] = hf_token
+        tts = Vieneu(mode="v3turbo", **init_kwargs)
+    except Exception as e:
+        print(f"[VieNeu] Failed to load model: {e}")
+        return
+
+    # ── Build voice pool ──────────────────────────────────────────────────────
+    # Priority: ref_audio (zero-shot clone) > explicit list > auto-all presets
+    use_ref_audio = bool(vieneu_ref_audio and Path(vieneu_ref_audio).exists())
+
+    if use_ref_audio:
+        voice_pool = [{"ref_audio": vieneu_ref_audio}]
+        print(f"[VieNeu] Zero-shot cloning from: {vieneu_ref_audio} (1 voice)")
+    else:
+        if vieneu_voices:
+            # User supplied explicit list — validate names
+            all_preset_names = {name for _, name in tts.list_preset_voices()}
+            invalid = [v for v in vieneu_voices if v not in all_preset_names and v != "default"]
+            if invalid:
+                print(f"[VieNeu] Warning: unknown voice(s) {invalid}. "
+                      f"Available: {sorted(all_preset_names)}")
+            voice_names = [v for v in vieneu_voices if v != "default" and v in all_preset_names]
+            if not voice_names:
+                voice_names = []  # fall to default below
+        else:
+            # Auto-discover every preset the model ships with
+            voice_names = [name for _, name in tts.list_preset_voices()]
+
+        if voice_names:
+            voice_pool = [{"voice": name} for name in voice_names]
+        else:
+            voice_pool = [{}]  # model built-in default (no kwarg needed)
+            voice_names = ["<default>"]
+
+        print(f"[VieNeu] Voice pool ({len(voice_pool)} voices): {voice_names}")
+
+    print(f"[VieNeu] batch_size={batch_size} | emotion={vieneu_emotion} | "
+          f"target_sr={target_sr}")
+
+    # ── Resample helper ───────────────────────────────────────────────────────
+    def _resample(audio: np.ndarray, orig_sr: int, tgt_sr: int) -> np.ndarray:
+        if orig_sr == tgt_sr:
+            return audio
+        g = gcd(orig_sr, tgt_sr)
+        return resample_poly(audio, tgt_sr // g, orig_sr // g).astype(np.float32)
+
+    # ── Generate loop ─────────────────────────────────────────────────────────
+    total_generated = 0
+    VMAX = 32767.0
+
+    with tqdm(total=max_samples, desc="[VieNeu] Generating", unit="clip") as pbar:
+        while total_generated < max_samples:
+            current_batch = min(batch_size, max_samples - total_generated)
+
+            for _ in range(current_batch):
+                if total_generated >= max_samples:
+                    break
+
+                t = random.choice(texts)
+                # Randomly pick a voice from the pool for diversity
+                voice_kwargs = random.choice(voice_pool)
+                wav_path = os.path.join(output_dir, f"{uuid.uuid4()}.wav")
+
+                try:
+                    audio = tts.infer(
+                        text=t,
+                        emotion=vieneu_emotion,
+                        apply_watermark=False,
+                        **voice_kwargs,
+                    )
+                    if audio is None or len(audio) == 0:
+                        continue
+
+                    # VieNeu v3 outputs 48 kHz — resample to 16 kHz
+                    audio_16k = _resample(audio, tts.sample_rate, target_sr)
+                    audio_int16 = np.clip(
+                        audio_16k * VMAX, -VMAX, VMAX
+                    ).astype(np.int16)
+                    wav_io.write(wav_path, target_sr, audio_int16)
+
+                    total_generated += 1
+                    pbar.update(1)
+                    pbar.set_postfix(voice=str(voice_kwargs.get("voice", "clone")))
+                except Exception as e:
+                    if os.path.exists(wav_path):
+                        os.remove(wav_path)
+                    print(f"\n[VieNeu] Warning: failed '{t[:40]}…' "
+                          f"(voice={voice_kwargs}): {e}")
+
+    # ── Cleanup ───────────────────────────────────────────────────────────────
+    try:
+        tts.close()
+    except Exception:
+        pass
+
+    print(f"[VieNeu] Done — {total_generated} clips saved to {output_dir}")
