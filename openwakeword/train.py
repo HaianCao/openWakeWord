@@ -615,11 +615,20 @@ if __name__ == '__main__':
     if not os.path.exists(os.path.join(config["output_dir"], config["model_name"])):
         os.mkdir(os.path.join(config["output_dir"], config["model_name"]))
 
-    positive_train_output_dir = os.path.join(config["output_dir"], config["model_name"], "positive_train")
-    positive_test_output_dir = os.path.join(config["output_dir"], config["model_name"], "positive_test")
-    negative_train_output_dir = os.path.join(config["output_dir"], config["model_name"], "negative_train")
-    negative_test_output_dir = os.path.join(config["output_dir"], config["model_name"], "negative_test")
-    feature_save_dir = os.path.join(config["output_dir"], config["model_name"])
+    # data_dir: cho phép tái sử dụng data đã sinh từ lần train trước mà không cần
+    # sinh lại chỉ vì đổi model_name. Nếu không set thì dùng hành vi mặc định cũ.
+    #   Colab: config["data_dir"] = "./vie_VieNeu_10000_adversarial_DNN/generated_data"
+    if "data_dir" in config and config["data_dir"]:
+        _data_root = os.path.abspath(config["data_dir"])
+    else:
+        _data_root = os.path.join(config["output_dir"], config["model_name"])
+
+    positive_train_output_dir = os.path.join(_data_root, "positive_train")
+    positive_test_output_dir  = os.path.join(_data_root, "positive_test")
+    negative_train_output_dir = os.path.join(_data_root, "negative_train")
+    negative_test_output_dir  = os.path.join(_data_root, "negative_test")
+    feature_save_dir          = _data_root
+
 
     # Get paths for impulse response and background audio files
     rir_paths = [i.path for j in config["rir_paths"] for i in os.scandir(j)]
