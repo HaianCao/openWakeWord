@@ -819,22 +819,107 @@ if __name__ == '__main__':
 
         # Tổng hợp tham số bổ sung cho từng loại model từ config
         _model_kwargs = {}
-        if config["model_type"] == "tc_resnet":
+        mtype = config["model_type"]
+
+        if mtype == "cnn":
+            _cfg = {
+                "cnn_filters":       "cnn_filters",
+                "cnn_kernel_sizes":  "cnn_kernel_sizes",
+                "cnn_dilations":     "cnn_dilations",
+                "cnn_dropout":       "dropout",
+                "cnn_fc_units":      "fc_units",
+            }
+            for cfg_key, kwarg_key in _cfg.items():
+                if cfg_key in config:
+                    _model_kwargs[kwarg_key] = config[cfg_key]
+
+        elif mtype == "crnn":
+            _cfg = {
+                "crnn_cnn_filters":      "cnn_filters",
+                "crnn_cnn_kernel_sizes": "cnn_kernel_sizes",
+                "crnn_gru_units":        "gru_units",
+                "crnn_dropout":          "dropout",
+                "crnn_fc_units":         "fc_units",
+            }
+            for cfg_key, kwarg_key in _cfg.items():
+                if cfg_key in config:
+                    _model_kwargs[kwarg_key] = config[cfg_key]
+
+        elif mtype == "mobilenet_v2":
+            _cfg = {
+                "mobilenet_stem_filters":      "stem_filters",
+                "mobilenet_stem_kernel_size":  "stem_kernel_size",
+                "mobilenet_stem_stride":       "stem_stride",
+                "mobilenet_block_filters":     "block_filters",
+                "mobilenet_block_kernel_sizes":"block_kernel_sizes",
+                "mobilenet_block_strides":     "block_strides",
+                "mobilenet_block_expansions":  "block_expansions",
+                "mobilenet_dropout":           "dropout",
+            }
+            for cfg_key, kwarg_key in _cfg.items():
+                if cfg_key in config:
+                    _model_kwargs[kwarg_key] = config[cfg_key]
+
+        elif mtype == "inception":
+            _cfg = {
+                "inception_stem_filters":  "stem_filters",
+                "inception_stem_kernels":  "stem_kernels",
+                "inception_filters1":      "inception_filters1",
+                "inception_filters2":      "inception_filters2",
+                "inception_kernels":       "inception_kernels",
+                "inception_dropout":       "dropout",
+            }
+            for cfg_key, kwarg_key in _cfg.items():
+                if cfg_key in config:
+                    _model_kwargs[kwarg_key] = config[cfg_key]
+
+        elif mtype == "inception_resnet":
+            _cfg = {
+                "inception_resnet_stem_filters":    "stem_filters",
+                "inception_resnet_stem_kernels":    "stem_kernels",
+                "inception_resnet_scales":          "scales",
+                "inception_resnet_branch0_filters": "branch0_filters",
+                "inception_resnet_branch1_filters": "branch1_filters",
+                "inception_resnet_out_filters":     "out_filters",
+                "inception_resnet_block_kernels":   "block_kernels",
+                "inception_resnet_dropout":         "dropout",
+            }
+            for cfg_key, kwarg_key in _cfg.items():
+                if cfg_key in config:
+                    _model_kwargs[kwarg_key] = config[cfg_key]
+
+        elif mtype == "tc_resnet":
             if "tc_resnet_channels" in config:
                 _model_kwargs["channels"] = config["tc_resnet_channels"]
             if "tc_resnet_kernel_size" in config:
                 _model_kwargs["kernel_size"] = config["tc_resnet_kernel_size"]
             if "tc_resnet_dropout" in config:
                 _model_kwargs["dropout"] = config["tc_resnet_dropout"]
-        elif config["model_type"] == "ds_tc_resnet":
-            for key in ("ds_filters", "ds_kernel_size", "ds_repeat", "ds_dilation",
-                        "ds_residual", "ds_stride"):
+
+        elif mtype == "ds_tc_resnet":
+            for key in ("ds_filters", "ds_kernel_size", "ds_repeat",
+                        "ds_dilation", "ds_residual", "ds_stride"):
                 if key in config:
                     _model_kwargs[key] = config[key]
             if "ds_dropout" in config:
                 _model_kwargs["dropout"] = config["ds_dropout"]
             if "ds_activation" in config:
                 _model_kwargs["activation"] = config["ds_activation"]
+
+        elif mtype == "svdf_resnet":
+            _cfg = {
+                "svdf_block_units":        "block_units",
+                "svdf_block_memory_sizes": "block_memory_sizes",
+                "svdf_blocks_pool":        "blocks_pool",
+                "svdf_use_batch_norm":     "use_batch_norm",
+                "svdf_dropout":            "svdf_dropout",
+                "svdf_out_dropout":        "dropout",
+                "svdf_activation":         "activation",
+                "svdf_fc_units":           "fc_units",
+            }
+            for cfg_key, kwarg_key in _cfg.items():
+                if cfg_key in config:
+                    _model_kwargs[kwarg_key] = config[cfg_key]
 
         oww = Model(n_classes=1, input_shape=input_shape, model_type=config["model_type"],
                     layer_dim=config["layer_size"], seconds_per_example=1280*input_shape[0]/16000,

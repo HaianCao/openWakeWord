@@ -103,10 +103,16 @@ batch_n_per_class:
 # Model Architecture Configuration
 # ---------------------------------------------------------------------------
 # Define the type of model to train. Options:
-#   "dnn"          : Fully-Connected DNN (mặc định, nhẹ nhất, latency ~1.1ms)
-#   "rnn"          : Bidirectional LSTM (hiểu chuỗi thời gian, latency ~4ms)
-#   "tc_resnet"    : Temporal Convolution ResNet (khuyên dùng: acc cao hơn DNN ~5%, latency tương đương)
-#   "ds_tc_resnet" : Depthwise-Separable TC-ResNet / MatchboxNet (nhẹ nhất, phù hợp MCU)
+#   "dnn"              : Fully-Connected DNN (mặc định, ~214K params, latency ~1.1ms)
+#   "rnn"              : Bidirectional 2-layer LSTM (~170K params, latency ~4ms)
+#   "cnn"              : Dilated CNN, nhỏ gọn (~500K params)
+#   "crnn"             : CNN + GRU, cân bằng tốc độ/chính xác (~800K params)
+#   "mobilenet_v2"     : MobileNetV2 1D, tối ưu cho mobile (~250K params)
+#   "inception"        : Inception (3-branch parallel conv, ~200K params)
+#   "inception_resnet" : Inception + Scaled Residual, mạnh nhất (~400K params)
+#   "tc_resnet"        : TC-ResNet, khuyên dùng (acc cao hơn DNN ~5%, ~300K params)
+#   "ds_tc_resnet"     : MatchboxNet, Depthwise-Separable, nhẹ nhất (~100K params)
+#   "svdf_resnet"      : SVDF + Residual, tối ưu streaming edge (~600K params)
 model_type: "dnn"
 
 # --- Tham số cho DNN (chỉ dùng khi model_type = "dnn") ---
@@ -114,6 +120,81 @@ model_type: "dnn"
 layer_size: 32
 # Số lượng FCN block lặp lại bên trong DNN
 n_blocks: 1
+
+# --- Tham số cho RNN (chỉ dùng khi model_type = "rnn") ---
+# (Không có tham số tuỳ chỉnh; kiến trúc cố định: 2-layer Bi-LSTM, hidden=64)
+
+# --- Tham số cho CNN (chỉ dùng khi model_type = "cnn") ---
+# Số filter tại mỗi lớp conv
+# cnn_filters: [64, 64, 64, 64, 128, 64, 128]
+# Kích thước kernel tại mỗi lớp conv
+# cnn_kernel_sizes: [3, 5, 5, 5, 5, 5, 10]
+# Dilation tại mỗi lớp conv (tăng receptive field không tăng param)
+# cnn_dilations: [1, 1, 2, 1, 2, 1, 2]
+# Tỉ lệ dropout sau lớp pool
+# cnn_dropout: 0.5
+# Số units trong các lớp FC sau conv
+# cnn_fc_units: [128, 256]
+
+# --- Tham số cho CRNN (chỉ dùng khi model_type = "crnn") ---
+# Số filter của các lớp CNN đầu tiên
+# crnn_cnn_filters: [16, 16]
+# Kích thước kernel của các lớp CNN
+# crnn_cnn_kernel_sizes: [3, 5]
+# Số units của lớp GRU
+# crnn_gru_units: 256
+# Tỉ lệ dropout
+# crnn_dropout: 0.1
+# Số units trong các lớp FC sau GRU
+# crnn_fc_units: [128, 256]
+
+# --- Tham số cho MobileNetV2 (chỉ dùng khi model_type = "mobilenet_v2") ---
+# Số filter của lớp Stem (conv đầu tiên)
+# mobilenet_stem_filters: 32
+# Kích thước kernel của lớp Stem
+# mobilenet_stem_kernel_size: 3
+# Stride của lớp Stem
+# mobilenet_stem_stride: 2
+# Số filter tại mỗi Inverted Residual Block
+# mobilenet_block_filters: [32, 32, 64, 64]
+# Kích thước kernel tại mỗi block (depthwise)
+# mobilenet_block_kernel_sizes: [3, 3, 3, 3]
+# Stride tại mỗi block (nếu != 1 thì không có residual connection)
+# mobilenet_block_strides: [1, 2, 1, 1]
+# Hệ số expansion của bottleneck tại mỗi block
+# mobilenet_block_expansions: [1.5, 1.5, 1.5, 1.5]
+# Tỉ lệ dropout
+# mobilenet_dropout: 0.2
+
+# --- Tham số cho Inception (chỉ dùng khi model_type = "inception") ---
+# Số filter và kernel của lớp stem trước các inception block
+# inception_stem_filters: [24]
+# inception_stem_kernels: [5]
+# Số filter trong mỗi nhánh của inception block (3 nhánh sẽ cho ra filters*3 rồi bottleneck về filters2)
+# inception_filters1: [10, 10, 16]
+# Số filter sau bottleneck 1x1 trong mỗi inception block
+# inception_filters2: [10, 10, 16]
+# Kích thước kernel của các conv bên trong inception block
+# inception_kernels: [5, 5, 5]
+# Tỉ lệ dropout
+# inception_dropout: 0.2
+
+# --- Tham số cho InceptionResNet (chỉ dùng khi model_type = "inception_resnet") ---
+# Số filter và kernel của lớp stem
+# inception_resnet_stem_filters: [32]
+# inception_resnet_stem_kernels: [5]
+# Hệ số scale (tỉ lệ nhân với residual trước khi cộng vào shortcut)
+# inception_resnet_scales: [0.2, 0.5, 1.0]
+# Số filter của nhánh branch0 (1x1 conv) tại mỗi inception-resnet block
+# inception_resnet_branch0_filters: [32, 32, 32]
+# Số filter của nhánh branch1 (conv kx1) tại mỗi block
+# inception_resnet_branch1_filters: [32, 32, 32]
+# Số filter đầu ra sau bottleneck (output channels) tại mỗi block
+# inception_resnet_out_filters: [32, 32, 64]
+# Kích thước kernel của conv trong branch1
+# inception_resnet_block_kernels: [3, 5, 5]
+# Tỉ lệ dropout
+# inception_resnet_dropout: 0.2
 
 # --- Tham số cho TC-ResNet (chỉ dùng khi model_type = "tc_resnet") ---
 # Số lượng filter tại mỗi tầng (bao gồm cả tầng stem đầu tiên)
@@ -140,6 +221,27 @@ n_blocks: 1
 # ds_dropout: 0.0
 # Hàm kích hoạt ("relu", "gelu", "elu")
 # ds_activation: "relu"
+
+# --- Tham số cho SVDF-ResNet (chỉ dùng khi model_type = "svdf_resnet") ---
+# Số units tại mỗi SVDF layer bên trong từng residual block (list of lists)
+# Mỗi phần tử là một list tương ứng với một residual block, chứa số units của mỗi layer trong block đó
+# svdf_block_units: [[256, 256], [256, 256], [256, 256]]
+# Memory size (số time-step lưu trong bộ nhớ) tại mỗi SVDF layer
+# Phải cùng cấu trúc với svdf_block_units
+# svdf_block_memory_sizes: [[4, 10], [10, 10], [10, 10]]
+# Pooling size sau mỗi residual block (1 = không pool)
+# svdf_blocks_pool: [1, 2, 2]
+# Có dùng BatchNorm trong SVDF hay không
+# svdf_use_batch_norm: true
+# Tỉ lệ dropout bên trong SVDF layer
+# svdf_dropout: 0.0
+# Tỉ lệ dropout sau toàn bộ SVDF blocks
+# svdf_out_dropout: 0.0
+# Hàm kích hoạt ("relu", "gelu")
+# svdf_activation: "relu"
+# Danh sách các lớp FC thêm vào sau SVDF blocks (rỗng = không có)
+# svdf_fc_units: []
+
 
 # ---------------------------------------------------------------------------
 # Training Parameters
