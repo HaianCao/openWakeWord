@@ -99,13 +99,51 @@ batch_n_per_class:
   "adversarial_negative": 100
   "positive": 100
 
-# Define the type of size of the openwakeword model to train. Increasing the layer size
-# may result in a more capable model, at the cost of decreased inference speed. The default
-# value (32) seems to work well in practice for most wake words/phrases.
-
+# ---------------------------------------------------------------------------
+# Model Architecture Configuration
+# ---------------------------------------------------------------------------
+# Define the type of model to train. Options:
+#   "dnn"          : Fully-Connected DNN (mặc định, nhẹ nhất, latency ~1.1ms)
+#   "rnn"          : Bidirectional LSTM (hiểu chuỗi thời gian, latency ~4ms)
+#   "tc_resnet"    : Temporal Convolution ResNet (khuyên dùng: acc cao hơn DNN ~5%, latency tương đương)
+#   "ds_tc_resnet" : Depthwise-Separable TC-ResNet / MatchboxNet (nhẹ nhất, phù hợp MCU)
 model_type: "dnn"
-layer_size: 32
 
+# --- Tham số cho DNN (chỉ dùng khi model_type = "dnn") ---
+# Kích thước lớp ẩn. Tăng lên để model mạnh hơn nhưng chậm hơn.
+layer_size: 32
+# Số lượng FCN block lặp lại bên trong DNN
+n_blocks: 1
+
+# --- Tham số cho TC-ResNet (chỉ dùng khi model_type = "tc_resnet") ---
+# Số lượng filter tại mỗi tầng (bao gồm cả tầng stem đầu tiên)
+# tc_resnet_channels: [24, 36, 36, 48, 48, 72, 72]
+# Kích thước kernel của lớp Conv tích chập theo trục thời gian
+# tc_resnet_kernel_size: 9
+# Tỉ lệ dropout
+# tc_resnet_dropout: 0.2
+
+# --- Tham số cho DS-TC-ResNet / MatchboxNet (chỉ dùng khi model_type = "ds_tc_resnet") ---
+# Số filter tại mỗi block (phải cùng độ dài với các list ds_* bên dưới)
+# ds_filters: [128, 64, 64, 64, 128, 128]
+# Kích thước kernel depthwise conv theo trục thời gian tại mỗi block
+# ds_kernel_size: [11, 13, 15, 17, 29, 1]
+# Số lần lặp sub-block bên trong mỗi block
+# ds_repeat: [1, 1, 1, 1, 1, 1]
+# Dilation của depthwise conv tại mỗi block
+# ds_dilation: [1, 1, 1, 1, 2, 1]
+# Có dùng residual connection (skip connection) tại mỗi block hay không (0/1)
+# ds_residual: [0, 1, 1, 1, 0, 0]
+# Stride của depthwise conv tại mỗi block
+# ds_stride: [1, 1, 1, 1, 1, 1]
+# Tỉ lệ dropout áp dụng sau mỗi block
+# ds_dropout: 0.0
+# Hàm kích hoạt ("relu", "gelu", "elu")
+# ds_activation: "relu"
+
+# ---------------------------------------------------------------------------
+# Training Parameters
+# ---------------------------------------------------------------------------
 # Define training parameters. The values below are recommended defaults for most applications,
 # but unique deployment environments will likely require testing to determine which values
 # are the most appropriate.
@@ -116,4 +154,4 @@ steps: 50000
 # The maximum negative weight and target false positives per hour, used to control the auto training process
 # The target false positive rate may not be achieved, and adjusting the maximum negative weight may be necessary
 max_negative_weight: 1500
-target_false_positives_per_hour: 0.2
+target_false_positives_per_hour: 0.2

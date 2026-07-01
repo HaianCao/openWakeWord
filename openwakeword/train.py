@@ -20,12 +20,13 @@ from openwakeword.data import generate_adversarial_texts, augment_clips, mmap_ba
 from openwakeword.utils import compute_features_from_generator
 from openwakeword.generate_custom_samples import generate_samples_vieneu
 from openwakeword.utils import AudioFeatures
+from openwakeword import architectures
 
 
 # Base model class for an openwakeword model
 class Model(nn.Module):
     def __init__(self, n_classes=1, input_shape=(16, 96), model_type="dnn",
-                 layer_dim=128, n_blocks=1, seconds_per_example=None):
+                 layer_dim=128, n_blocks=1, seconds_per_example=None, **model_kwargs):
         super().__init__()
 
         # Store inputs as attributes
@@ -40,61 +41,19 @@ class Model(nn.Module):
         self.best_val_recall = 0
         self.best_train_recall = 0
 
-        # Define model (currently on fully-connected network supported)
+        # Build model from architectures registry.
+        # DNN/RNN tham số extra truyền qua model_kwargs;
+        # TCResNet/DSTCResNet nhận cùng cú pháp.
+        extra = {}
         if model_type == "dnn":
-            # self.model = nn.Sequential(
-            #     nn.Flatten(),
-            #     nn.Linear(input_shape[0]*input_shape[1], layer_dim),
-            #     nn.LayerNorm(layer_dim),
-            #     nn.ReLU(),
-            #     nn.Linear(layer_dim, layer_dim),
-            #     nn.LayerNorm(layer_dim),
-            #     nn.ReLU(),
-            #     nn.Linear(layer_dim, n_classes),
-            #     nn.Sigmoid() if n_classes == 1 else nn.ReLU(),
-            # )
-
-            class FCNBlock(nn.Module):
-                def __init__(self, layer_dim):
-                    super().__init__()
-                    self.fcn_layer = nn.Linear(layer_dim, layer_dim)
-                    self.relu = nn.ReLU()
-                    self.layer_norm = nn.LayerNorm(layer_dim)
-
-                def forward(self, x):
-                    return self.relu(self.layer_norm(self.fcn_layer(x)))
-
-            class Net(nn.Module):
-                def __init__(self, input_shape, layer_dim, n_blocks=1, n_classes=1):
-                    super().__init__()
-                    self.flatten = nn.Flatten()
-                    self.layer1 = nn.Linear(input_shape[0]*input_shape[1], layer_dim)
-                    self.relu1 = nn.ReLU()
-                    self.layernorm1 = nn.LayerNorm(layer_dim)
-                    self.blocks = nn.ModuleList([FCNBlock(layer_dim) for i in range(n_blocks)])
-                    self.last_layer = nn.Linear(layer_dim, n_classes)
-                    self.last_act = nn.Sigmoid() if n_classes == 1 else nn.ReLU()
-
-                def forward(self, x):
-                    x = self.relu1(self.layernorm1(self.layer1(self.flatten(x))))
-                    for block in self.blocks:
-                        x = block(x)
-                    x = self.last_act(self.last_layer(x))
-                    return x
-            self.model = Net(input_shape, layer_dim, n_blocks=n_blocks, n_classes=n_classes)
-        elif model_type == "rnn":
-            class Net(nn.Module):
-                def __init__(self, input_shape, n_classes=1):
-                    super().__init__()
-                    self.layer1 = nn.LSTM(input_shape[-1], 64, num_layers=2, bidirectional=True,
-                                          batch_first=True, dropout=0.0)
-                    self.layer2 = nn.Linear(64*2, n_classes)
-                    self.layer3 = nn.Sigmoid() if n_classes == 1 else nn.ReLU()
-
-                def forward(self, x):
-                    out, h = self.layer1(x)
-                    return self.layer3(self.layer2(out[:, -1]))
-            self.model = Net(input_shape, n_classes)
+            extra = {"layer_dim": layer_dim, "n_blocks": n_blocks}
+        extra.update(model_kwargs)
+        self.model = architectures.build_model(
+            model_type=model_type,
+            input_shape=input_shape,
+            n_classes=n_classes,
+            **extra,
+        )
 
         # Define metrics
         if n_classes == 1:
@@ -858,8 +817,29 @@ if __name__ == '__main__':
         F = openwakeword.utils.AudioFeatures(device='cpu')
         input_shape = np.load(os.path.join(feature_save_dir, "positive_features_test.npy")).shape[1:]
 
+        # Tổng hợp tham số bổ sung cho từng loại model từ config
+        _model_kwargs = {}
+        if config["model_type"] == "tc_resnet":
+            if "tc_resnet_channels" in config:
+                _model_kwargs["channels"] = config["tc_resnet_channels"]
+            if "tc_resnet_kernel_size" in config:
+                _model_kwargs["kernel_size"] = config["tc_resnet_kernel_size"]
+            if "tc_resnet_dropout" in config:
+                _model_kwargs["dropout"] = config["tc_resnet_dropout"]
+        elif config["model_type"] == "ds_tc_resnet":
+            for key in ("ds_filters", "ds_kernel_size", "ds_repeat", "ds_dilation",
+                        "ds_residual", "ds_stride"):
+                if key in config:
+                    _model_kwargs[key] = config[key]
+            if "ds_dropout" in config:
+                _model_kwargs["dropout"] = config["ds_dropout"]
+            if "ds_activation" in config:
+                _model_kwargs["activation"] = config["ds_activation"]
+
         oww = Model(n_classes=1, input_shape=input_shape, model_type=config["model_type"],
-                    layer_dim=config["layer_size"], seconds_per_example=1280*input_shape[0]/16000)
+                    layer_dim=config["layer_size"], seconds_per_example=1280*input_shape[0]/16000,
+                    **_model_kwargs)
+
 
         # Create data transform function for batch generation to handle differ clip lengths (todo: write tests for this)
         def f(x, n=input_shape[0]):
