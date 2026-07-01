@@ -746,23 +746,27 @@ if __name__ == '__main__':
         else:
             logging.warning(f"Skipping generation of negative clips for testing, as ~{config['n_samples_val']} already exist")
 
-    # Set the total length of the training clips based on the ~median generated clip duration, rounding to the nearest 1000 samples
-    # and setting to 32000 when the median + 750 ms is close to that, as it's a good default value
-    n = 50  # sample size
-    positive_clips = [str(i) for i in Path(positive_test_output_dir).glob("*.wav")]
-    duration_in_samples = []
-    for i in range(n):
-        sr, dat = scipy.io.wavfile.read(positive_clips[np.random.randint(0, len(positive_clips))])
-        duration_in_samples.append(len(dat))
-
-    config["total_length"] = int(round(np.median(duration_in_samples)/1000)*1000) + 12000  # add 750 ms to clip duration as buffer
-    if config["total_length"] < 32000:
-        config["total_length"] = 32000  # set a minimum of 32000 samples (2 seconds)
-    elif abs(config["total_length"] - 32000) <= 4000:
-        config["total_length"] = 32000
-
     # Do Data Augmentation
     if args.augment_clips is True:
+        # Set the total length of the training clips based on the ~median generated clip duration, rounding to the nearest 1000 samples
+        # and setting to 32000 when the median + 750 ms is close to that, as it's a good default value
+        n = min(50, len(os.listdir(positive_test_output_dir)))  # sample size, cap at available files
+        positive_clips = [str(i) for i in Path(positive_test_output_dir).glob("*.wav")]
+        duration_in_samples = []
+        
+        if len(positive_clips) > 0:
+            for i in range(n):
+                sr, dat = scipy.io.wavfile.read(positive_clips[np.random.randint(0, len(positive_clips))])
+                duration_in_samples.append(len(dat))
+
+            config["total_length"] = int(round(np.median(duration_in_samples)/1000)*1000) + 12000  # add 750 ms to clip duration as buffer
+            if config["total_length"] < 32000:
+                config["total_length"] = 32000  # set a minimum of 32000 samples (2 seconds)
+            elif abs(config["total_length"] - 32000) <= 4000:
+                config["total_length"] = 32000
+        else:
+            config["total_length"] = 32000  # Fallback nếu không tìm thấy clip
+
         if not os.path.exists(os.path.join(feature_save_dir, "positive_features_train.npy")) or args.overwrite is True:
             positive_clips_train = [str(i) for i in Path(positive_train_output_dir).glob("*.wav")]*config["augmentation_rounds"]
             positive_clips_train_generator = augment_clips(positive_clips_train, total_length=config["total_length"],
