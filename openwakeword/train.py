@@ -175,7 +175,8 @@ class Model(nn.Module):
                 averaged_model_dict[key] += value
 
         for key in averaged_model_dict:
-            averaged_model_dict[key] /= len(models)
+            # Ép sang float để chia, sau đó ép ngược lại kiểu gốc (ví dụ: Long cho num_batches_tracked của BatchNorm)
+            averaged_model_dict[key] = (averaged_model_dict[key].float() / len(models)).to(averaged_model_dict[key].dtype)
 
         # Load the averaged weights into the model
         averaged_model.load_state_dict(averaged_model_dict)
