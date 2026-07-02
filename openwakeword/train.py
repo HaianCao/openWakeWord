@@ -991,7 +991,7 @@ if __name__ == '__main__':
         X_val_fp_labels = np.zeros(X_val_fp.shape[0]).astype(np.float32)
         X_val_fp = torch.utils.data.DataLoader(
             torch.utils.data.TensorDataset(torch.from_numpy(X_val_fp), torch.from_numpy(X_val_fp_labels)),
-            batch_size=len(X_val_fp_labels)
+            batch_size=min(8192, len(X_val_fp_labels))
         )
 
         X_val_pos = np.load(os.path.join(feature_save_dir, "positive_features_test.npy"))
@@ -1003,7 +1003,7 @@ if __name__ == '__main__':
                 torch.from_numpy(np.vstack((X_val_pos, X_val_neg))),
                 torch.from_numpy(labels)
                 ),
-            batch_size=len(labels)
+            batch_size=min(8192, len(labels))
         )
 
         # Run auto training
